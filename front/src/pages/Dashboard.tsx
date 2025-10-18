@@ -69,7 +69,7 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           <h2 style={{ marginBottom: '16px' }}>現在の状態</h2>
           <div style={{ fontSize: '18px' }}>
             <p><strong>選択中のモード:</strong> 機能{currentMode.replace('mode', '')}</p>
-            <p style={{ marginTop: '8px' }}><strong>登録デバイス数:</strong> 3台</p>
+            <p style={{ marginTop: '8px' }}><strong>登録トラッカー数:</strong> 3台</p>
             <p style={{ marginTop: '8px' }}><strong>登録ビーコン数:</strong> 3台</p>
           </div>
         </div>
@@ -81,7 +81,7 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
               className="btn btn-primary"
               onClick={() => navigate('/management')}
             >
-              デバイス管理
+              トラッカー・ビーコン管理
             </button>
             <button 
               className="btn btn-outline"

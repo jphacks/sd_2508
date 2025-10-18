@@ -39,7 +39,10 @@ export default function Calibration() {
 
   const loadDevices = async () => {
     const snapshot = await getDocs(collection(db, 'devices'));
-    const data = snapshot.docs.map(doc => ({ ...doc.data(), deviceId: doc.id } as Device));
+    const data = snapshot.docs.map(doc => ({ 
+      id: doc.id,
+      ...doc.data()
+    } as Device & { id: string }));
     setDevices(data);
   };
 
@@ -272,7 +275,7 @@ export default function Calibration() {
             </p>
 
             <div className="form-group">
-              <label className="form-label">測定に使用するデバイス</label>
+              <label className="form-label">測定に使用するトラッカー</label>
               <select
                 className="form-select"
                 value={selectedDevice}
@@ -280,8 +283,8 @@ export default function Calibration() {
               >
                 <option value="">選択してください</option>
                 {devices.map(device => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.name || device.deviceId}
+                  <option key={device.devEUI} value={device.devEUI}>
+                    {device.userName || device.deviceId}
                   </option>
                 ))}
               </select>

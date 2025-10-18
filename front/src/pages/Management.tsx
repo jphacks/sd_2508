@@ -18,10 +18,13 @@ export default function Management() {
   const loadDevices = async () => {
     try {
       const snapshot = await getDocs(collection(db, 'devices'));
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), deviceId: doc.id } as Device));
+      const data = snapshot.docs.map(doc => ({ 
+        id: doc.id,
+        ...doc.data()
+      } as Device & { id: string }));
       setDevices(data);
     } catch (error) {
-      console.error('デバイス読み込みエラー:', error);
+      console.error('トラッカー読み込みエラー:', error);
     }
   };
 
@@ -41,9 +44,9 @@ export default function Management() {
     
     const newDevice: Partial<Device> = {
       deviceId: formData.get('deviceId') as string,
-      name: formData.get('name') as string,
-      mac: formData.get('mac') as string || undefined,
-      model: formData.get('model') as string || 'SenseCAP T1000',
+      userName: formData.get('userName') as string,
+      devEUI: formData.get('devEUI') as string,
+      model: formData.get('model') as string || 'SenseCAP T1000-A',
       ownerUid: 'demo-user', // TODO: 実際のユーザーID
       status: 'active',
       tags: []
@@ -54,8 +57,8 @@ export default function Management() {
       setShowAddDevice(false);
       loadDevices();
     } catch (error) {
-      console.error('デバイス追加エラー:', error);
-      alert('デバイスの追加に失敗しました');
+      console.error('トラッカー追加エラー:', error);
+      alert('トラッカーの追加に失敗しました');
     }
   };
 
@@ -82,15 +85,15 @@ export default function Management() {
     }
   };
 
-  const handleDeleteDevice = async (deviceId: string) => {
-    if (!confirm('本当にこのデバイスを削除しますか？')) return;
+  const handleDeleteDevice = async (id: string) => {
+    if (!confirm('本当にこのトラッカーを削除しますか？')) return;
     
     try {
-      await deleteDoc(doc(db, 'devices', deviceId));
+      await deleteDoc(doc(db, 'devices', id));
       loadDevices();
     } catch (error) {
-      console.error('デバイス削除エラー:', error);
-      alert('デバイスの削除に失敗しました');
+      console.error('トラッカー削除エラー:', error);
+      alert('トラッカーの削除に失敗しました');
     }
   };
 
@@ -117,7 +120,7 @@ export default function Management() {
           className={`btn ${activeTab === 'devices' ? 'btn-primary' : 'btn-outline'}`}
           onClick={() => setActiveTab('devices')}
         >
-          デバイス管理
+          トラッカー管理
         </button>
         <button
           className={`btn ${activeTab === 'beacons' ? 'btn-primary' : 'btn-outline'}`}
@@ -131,34 +134,36 @@ export default function Management() {
         <div>
           <div className="card" style={{ marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2>デバイス一覧</h2>
+              <h2>トラッカー一覧</h2>
               <button className="btn btn-primary" onClick={() => setShowAddDevice(true)}>
-                ＋ デバイス追加
+                ＋ トラッカー追加
               </button>
             </div>
 
             {devices.length === 0 ? (
               <p style={{ textAlign: 'center', padding: '40px', color: '#7f8c8d' }}>
-                登録されているデバイスはありません
+                登録されているトラッカーはありません
               </p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
-                      <th style={{ padding: '12px' }}>名前</th>
-                      <th style={{ padding: '12px' }}>デバイスID</th>
+                      <th style={{ padding: '12px' }}>トラッカー名</th>
+                      <th style={{ padding: '12px' }}>所持者</th>
+                      <th style={{ padding: '12px' }}>DevEUI</th>
                       <th style={{ padding: '12px' }}>モデル</th>
                       <th style={{ padding: '12px' }}>状態</th>
                       <th style={{ padding: '12px' }}>操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {devices.map(device => (
-                      <tr key={device.deviceId} style={{ borderBottom: '1px solid #e1e8ed' }}>
-                        <td style={{ padding: '12px' }}><strong>{device.name || '未設定'}</strong></td>
+                    {devices.map((device, index) => (
+                      <tr key={(device as any).id || index} style={{ borderBottom: '1px solid #e1e8ed' }}>
+                        <td style={{ padding: '12px' }}><strong>{device.deviceId || '未設定'}</strong></td>
+                        <td style={{ padding: '12px' }}>{device.userName || '未設定'}</td>
                         <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
-                          {device.deviceId}
+                          {device.devEUI}
                         </td>
                         <td style={{ padding: '12px' }}>{device.model}</td>
                         <td style={{ padding: '12px' }}>
@@ -176,7 +181,7 @@ export default function Management() {
                           <button
                             className="btn btn-danger"
                             style={{ padding: '6px 12px', fontSize: '14px' }}
-                            onClick={() => handleDeleteDevice(device.deviceId)}
+                            onClick={() => handleDeleteDevice((device as any).id)}
                           >
                             削除
                           </button>
@@ -191,36 +196,40 @@ export default function Management() {
 
           {showAddDevice && (
             <div className="card">
-              <h3 style={{ marginBottom: '16px' }}>新しいデバイスを追加</h3>
+              <h3 style={{ marginBottom: '16px' }}>新しいトラッカーを追加</h3>
               <form onSubmit={handleAddDevice}>
                 <div className="form-group">
-                  <label className="form-label">デバイスID *</label>
+                  <label className="form-label">トラッカー名 *</label>
                   <input
                     type="text"
                     name="deviceId"
                     className="form-input"
-                    placeholder="例: 2CF7F1C07030002F"
+                    placeholder="例: トラッカー01"
                     required
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">名前 *</label>
+                  <label className="form-label">所持者名 *</label>
                   <input
                     type="text"
-                    name="name"
+                    name="userName"
                     className="form-input"
                     placeholder="例: 太郎"
                     required
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">MACアドレス</label>
+                  <label className="form-label">DevEUI *</label>
                   <input
                     type="text"
-                    name="mac"
+                    name="devEUI"
                     className="form-input"
-                    placeholder="例: 11:22:33:44:55:66"
+                    placeholder="例: 2CF7F1C07030002F"
+                    required
                   />
+                  <small style={{ color: '#7f8c8d', fontSize: '12px' }}>
+                    LoRaWANデバイスの64ビットEUI（16桁の16進数）
+                  </small>
                 </div>
                 <div className="form-group">
                   <label className="form-label">モデル</label>
@@ -228,7 +237,7 @@ export default function Management() {
                     type="text"
                     name="model"
                     className="form-input"
-                    defaultValue="SenseCAP T1000"
+                    defaultValue="SenseCAP T1000-A"
                   />
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>

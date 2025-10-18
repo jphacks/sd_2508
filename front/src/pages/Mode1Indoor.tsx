@@ -25,7 +25,10 @@ export default function Mode1Indoor() {
 
       // デバイス一覧を取得
       const devicesSnapshot = await getDocs(collection(db, 'devices'));
-      const devicesData = devicesSnapshot.docs.map(doc => ({ ...doc.data(), deviceId: doc.id } as Device));
+      const devicesData = devicesSnapshot.docs.map(doc => ({ 
+        id: doc.id,
+        ...doc.data()
+      } as Device & { id: string }));
       setDevices(devicesData);
 
       // TODO: アクティブな部屋プロファイルを取得
@@ -78,7 +81,7 @@ export default function Mode1Indoor() {
 
       // 各デバイスのBLEスキャンデータを監視
       devicesData.forEach(device => {
-        const scansRef = ref(rtdb, `devices/${device.deviceId}/ble_scans`);
+        const scansRef = ref(rtdb, `devices/${device.devEUI}/ble_scans`);
         onValue(scansRef, (snapshot) => {
           const data = snapshot.val();
           if (data) {
@@ -101,7 +104,7 @@ export default function Mode1Indoor() {
               if (position) {
                 setDevicePositions(prev => {
                   const newMap = new Map(prev);
-                  newMap.set(device.deviceId, { x: position.x, y: position.y });
+                  newMap.set(device.devEUI, { x: position.x, y: position.y });
                   return newMap;
                 });
 
@@ -136,9 +139,9 @@ export default function Mode1Indoor() {
       const alert: Alert = {
         id: `alert-${Date.now()}`,
         type: 'exit_room',
-        message: `${device.name || device.deviceId} が部屋から出ました！`,
-        deviceId: device.deviceId,
-        deviceName: device.name,
+        message: `${device.userName || device.deviceId} が部屋から出ました！`,
+        deviceId: device.devEUI,
+        deviceName: device.userName,
         timestamp: new Date().toISOString(),
         dismissed: false
       };
@@ -218,7 +221,7 @@ export default function Mode1Indoor() {
 
     // デバイスの位置を描画
     devicePositions.forEach((position, deviceId) => {
-      const device = devices.find(d => d.deviceId === deviceId);
+      const device = devices.find(d => d.devEUI === deviceId);
       const x = padding + position.x * scale;
       const y = padding + position.y * scale;
 
@@ -235,7 +238,7 @@ export default function Mode1Indoor() {
       ctx.fillStyle = '#2c3e50';
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(device?.name || deviceId, x, y - 20);
+      ctx.fillText(device?.userName || device?.deviceId || deviceId, x, y - 20);
     });
 
     // グリッド線（オプション）
@@ -312,12 +315,12 @@ export default function Mode1Indoor() {
 
       <div className="grid grid-2">
         <div className="card">
-          <h3 style={{ marginBottom: '12px' }}>デバイス一覧</h3>
+          <h3 style={{ marginBottom: '12px' }}>トラッカー一覧</h3>
           {devices.map(device => {
-            const position = devicePositions.get(device.deviceId);
+            const position = devicePositions.get(device.devEUI);
             return (
               <div
-                key={device.deviceId}
+                key={device.devEUI}
                 style={{
                   padding: '12px',
                   borderBottom: '1px solid #e1e8ed',
@@ -326,7 +329,7 @@ export default function Mode1Indoor() {
                 }}
               >
                 <div>
-                  <strong>{device.name || device.deviceId}</strong>
+                  <strong>{device.userName || device.deviceId}</strong>
                   {position && (
                     <p style={{ fontSize: '12px', marginTop: '4px', color: '#7f8c8d' }}>
                       位置: ({position.x.toFixed(2)}m, {position.y.toFixed(2)}m)

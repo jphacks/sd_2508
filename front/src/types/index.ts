@@ -1,9 +1,8 @@
-// デバイス関連の型定義
+// デバイス（トラッカー）関連の型定義
 export interface Device {
-  deviceId: string;
-  mac?: string;
+  deviceId: string; // トラッカーにつけた名前（識別用）
+  devEUI: string; // LoRaWAN デバイスEUI（必須）
   lorawan?: {
-    devEUI: string;
     joinEUI?: string;
     appEUI?: string;
   };
@@ -12,7 +11,7 @@ export interface Device {
   ownerUid: string;
   status: 'active' | 'inactive';
   tags?: string[];
-  name?: string; // ユーザー名
+  userName?: string; // トラッカー所持者のユーザー名
 }
 
 // ビーコン関連の型定義
