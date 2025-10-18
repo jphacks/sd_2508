@@ -28,8 +28,7 @@ const TEST_ROOM = {
   ]
 };
 
-// テスト用家具タイプ定義
-const FURNITURE_TYPES = {
+export const FURNITURE_TYPES = {
   desk: { label: '机', width: 2, height: 1, color: '#8B4513' },
   tv: { label: 'テレビ', width: 3, height: 0.5, color: '#2C3E50' },
   piano: { label: 'ピアノ', width: 2, height: 1.5, color: '#1A1A1A' },
@@ -37,7 +36,7 @@ const FURNITURE_TYPES = {
   door: { label: 'ドア', width: 1, height: 0.2, color: '#D2691E' }
 } as const;
 
-type FurnitureType = keyof typeof FURNITURE_TYPES;
+export type FurnitureType = keyof typeof FURNITURE_TYPES;
 
 
 export default function Calibration() {
