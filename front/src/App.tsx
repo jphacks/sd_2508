@@ -80,6 +80,8 @@ function App() {
           <Route path="/management" element={<Management />} />
           <Route path="/calibration" element={<CalibrationRoomList />} />
           <Route path="/calibration/:mode" element={<Calibration />} />
+          <Route path="/calibration/:mode/:roomId" element={<Calibration />} />
+          <Route path="/edit-furniture/:roomId" element={<Calibration />} />
           <Route path="/edit-room/:roomId" element={<EditRoom />} />
           <Route path="/add-calibration-point/:roomId" element={<AddCalibrationPoint />} />
           <Route path="*" element={<Navigate to="/" replace />} />
