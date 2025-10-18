@@ -5,6 +5,14 @@ import { rtdb, db } from '../firebase';
 import { Device, BLEScan, RoomProfile, Alert, Beacon } from '../types';
 import { estimatePositionHybrid } from '../utils/positioning';
 
+const FURNITURE_TYPES = {
+  desk: { label: '机', width: 2, height: 1, color: '#8B4513' },
+  tv: { label: 'テレビ', width: 3, height: 0.5, color: '#2C3E50' },
+  piano: { label: 'ピアノ', width: 2, height: 1.5, color: '#1A1A1A' },
+  chair: { label: '椅子', width: 0.8, height: 0.8, color: '#CD853F' },
+  door: { label: 'ドア', width: 1, height: 0.2, color: '#D2691E' }
+} as const;
+
 export default function Mode1Indoor() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
@@ -174,15 +182,20 @@ export default function Mode1Indoor() {
     setAlerts(prev => prev.filter(a => a.id !== alertId));
   };
 
-  useEffect(() => {
-    if (roomProfile && canvasRef.current) {
-      drawRoom();
-    }
-  }, [roomProfile, devicePositions]);
+
+  // drawRoom関数の完全版
 
   const drawRoom = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !roomProfile) return;
+    if (!canvas || !roomProfile) {
+      console.log('Canvas or roomProfile not ready');
+      return;
+    }
+
+    console.log('Drawing room...', { 
+      furniture: roomProfile.furniture?.length || 0,
+      devices: devicePositions.size 
+    });
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -212,46 +225,7 @@ export default function Mode1Indoor() {
       roomProfile.outline!.height * scale
     );
 
-    // 家具を描画
-    roomProfile.furniture?.forEach(furniture => {
-      ctx.fillStyle = '#95a5a6';
-      const x = padding + furniture.position.x * scale;
-      const y = padding + furniture.position.y * scale;
-      const w = (furniture.width || 1) * scale;
-      const h = (furniture.height || 1) * scale;
-      
-      ctx.fillRect(x, y, w, h);
-      
-      // ラベル
-      ctx.fillStyle = '#2c3e50';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(furniture.type, x + w / 2, y + h / 2 + 4);
-    });
-
-    // デバイスの位置を描画
-    devicePositions.forEach((position, deviceId) => {
-      const device = devices.find(d => d.devEUI === deviceId);
-      const x = padding + position.x * scale;
-      const y = padding + position.y * scale;
-
-      // デバイスの円
-      ctx.beginPath();
-      ctx.arc(x, y, 12, 0, Math.PI * 2);
-      ctx.fillStyle = '#4A90E2';
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // 名前
-      ctx.fillStyle = '#2c3e50';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(device?.userName || device?.deviceId || deviceId, x, y - 20);
-    });
-
-    // グリッド線（オプション）
+    // グリッド線（最背面）
     ctx.strokeStyle = '#e1e8ed';
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
@@ -270,7 +244,122 @@ export default function Mode1Indoor() {
       ctx.stroke();
     }
     ctx.setLineDash([]);
+
+    // 家具を描画（中間層）
+    if (roomProfile.furniture && roomProfile.furniture.length > 0) {
+      console.log('Drawing furniture:', roomProfile.furniture.length);
+      roomProfile.furniture.forEach(furniture => {
+        const furnitureType = FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
+        const furnitureColor = furnitureType?.color || '#95a5a6';
+        
+        ctx.fillStyle = furnitureColor;
+        const x = padding + furniture.position.x * scale;
+        const y = padding + furniture.position.y * scale;
+        const w = (furniture.width || 1) * scale;
+        const h = (furniture.height || 1) * scale;
+        
+        ctx.fillRect(x, y, w, h);
+        
+        // 家具の境界線
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, w, h);
+        
+        // ラベル
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 2;
+        
+        ctx.strokeText(furnitureType?.label || furniture.type, x + w / 2, y + h / 2 + 4);
+        ctx.fillText(furnitureType?.label || furniture.type, x + w / 2, y + h / 2 + 4);
+      });
+    }
+
+    // デバイスの位置を描画（最前面）
+    if (devicePositions.size > 0) {
+      console.log('Drawing devices:', devicePositions.size);
+      devicePositions.forEach((position, deviceId) => {
+        const device = devices.find(d => d.devEUI === deviceId);
+        const x = padding + position.x * scale;
+        const y = padding + position.y * scale;
+
+        // デバイスの影
+        ctx.beginPath();
+        ctx.arc(x + 2, y + 2, 14, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.fill();
+
+        // デバイスの円（メイン）
+        ctx.beginPath();
+        ctx.arc(x, y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = '#4A90E2';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // 内側の小さな円
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+
+        // 名前（背景付き）
+        const deviceName = device?.userName || device?.deviceId || deviceId;
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        
+        const textMetrics = ctx.measureText(deviceName);
+        const textWidth = textMetrics.width + 8;
+        const textHeight = 16;
+      
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fillRect(
+          x - textWidth / 2, 
+          y - 35 - textHeight / 2, 
+          textWidth, 
+          textHeight
+        );
+
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(
+          x - textWidth / 2, 
+          y - 35 - textHeight / 2, 
+          textWidth, 
+          textHeight
+        );
+
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillText(deviceName, x, y - 30);
+
+        // 位置座標
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillText(
+          `(${position.x.toFixed(1)}, ${position.y.toFixed(1)})`, 
+          x, 
+          y + 25
+        );
+      });
+    }
+
+    console.log('Room drawing completed');
   };
+
+  useEffect(() => {
+    console.log('Drawing trigger - roomProfile:', !!roomProfile, 'devices:', devicePositions.size);
+    if (roomProfile) {
+      // 少し遅延させて確実に描画
+      const timer = setTimeout(() => {
+        drawRoom();
+      }, 50);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [roomProfile, devicePositions, devices]);
 
   if (loading) {
     return (
