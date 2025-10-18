@@ -1278,17 +1278,17 @@ export default function Calibration() {
       if (doorEstimationResult) {
         console.log('✅ ドア位置推定成功:', doorEstimationResult);
         
-        // 自動でドアを配置
+        // 家具タイプを取得
         const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
         const doorType = furnitureTypes.door;
         
-        // ドアの向きに応じてサイズを調整
+        // ドアの向きに応じてサイズを調整するかどうかの判定
         const orientation = doorEstimationResult.orientation;
-        const isHorizontalDoor = Math.abs(orientation.direction.x) > Math.abs(orientation.direction.y);
+        const isVerticalMovement = Math.abs(orientation.direction.y) > Math.abs(orientation.direction.x);
         
-        // ドアが水平方向（左右の壁）か垂直方向（上下の壁）かでサイズを調整
-        const doorWidth = isHorizontalDoor ? doorType.height : doorType.width;   // 向きに応じて幅と高さを入れ替え
-        const doorHeight = isHorizontalDoor ? doorType.width : doorType.height;
+        // ドアのサイズ：元のサイズをそのまま使用（向きによる調整なし）
+        const doorWidth = doorType.width;   // 元のwidth（0.2/roomWidth）をそのまま使用
+        const doorHeight = doorType.height; // 元のheight（0.05/roomHeight）をそのまま使用
 
         const autoDoor: FurnitureItem = {
           id: `auto-door-${Date.now()}`,
@@ -1301,9 +1301,9 @@ export default function Calibration() {
         console.log('🚪 ドア配置詳細:', {
           position: doorEstimationResult.position,
           orientation: orientation,
-          isHorizontalDoor,
-          originalSize: { width: doorType.width, height: doorType.height },
-          adjustedSize: { width: doorWidth, height: doorHeight },
+          isVerticalMovement,
+          originalDoorType: doorType,
+          finalSize: { width: doorWidth, height: doorHeight },
           angle: orientation.angle
         });
         
@@ -1312,15 +1312,15 @@ export default function Calibration() {
         
         console.log('✅ ドアを自動配置しました:', autoDoor);
         
-        // ユーザーに通知（詳細情報付き）
+        // ユーザーに通知（元のサイズ情報付き）
         setTimeout(() => {
           alert(`🎉 キャリブレーションが完了しました！
 
   📍 ドア配置詳細:
   • 位置: (${doorEstimationResult.position.x.toFixed(3)}, ${doorEstimationResult.position.y.toFixed(3)})
   • 向き: ${orientation.angle.toFixed(1)}度
-  • サイズ: ${doorWidth.toFixed(3)} × ${doorHeight.toFixed(3)}
-  • 配置方法: ${isHorizontalDoor ? '水平（左右の壁）' : '垂直（上下の壁）'}
+  • サイズ: ${doorWidth.toFixed(3)} × ${doorHeight.toFixed(3)} (元の設定サイズ)
+  • 移動方向: ${isVerticalMovement ? '縦方向（上下）' : '横方向（左右）'}
 
   🔧 位置やサイズを手動で調整できます。`);
         }, 500);
