@@ -12,6 +12,7 @@ import Mode2Bus from './pages/Mode2Bus';
 import Mode3GPS from './pages/Mode3GPS';
 import Management from './pages/Management';
 import Calibration from './pages/Calibration';
+import AddCalibrationPoint from './pages/AddCalibrationPoint';
 import Login from './pages/Login';
 import { AppMode } from './types';
 
@@ -83,6 +84,7 @@ function App() {
           <Route path="/mode3" element={<Mode3GPS />} />
           <Route path="/management" element={<Management />} />
           <Route path="/calibration/:mode" element={<Calibration />} />
+          <Route path="/add-calibration-point/:roomId" element={<AddCalibrationPoint />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

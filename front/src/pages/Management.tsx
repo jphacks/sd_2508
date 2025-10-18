@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Device, Beacon, RoomProfile } from '../types';
 
 export default function Management() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'devices' | 'beacons' | 'rooms'>('devices');
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<Beacon[]>([]);
@@ -642,6 +644,13 @@ export default function Management() {
                                 使用する
                               </button>
                             )}
+                            <button
+                              className="btn btn-outline"
+                              style={{ padding: '6px 12px', fontSize: '14px' }}
+                              onClick={() => navigate(`/add-calibration-point/${room.id}`)}
+                            >
+                              点を追加
+                            </button>
                             <button
                               className="btn btn-danger"
                               style={{ padding: '6px 12px', fontSize: '14px' }}
