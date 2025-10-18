@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import './styles.css';
 import 'leaflet/dist/leaflet.css';
@@ -66,14 +66,7 @@ function App() {
             <Link to="/" className="logo">
               見守りカード
             </Link>
-            <nav className="nav">
-              <Link to="/" className="nav-link">ホーム</Link>
-              <Link to="/management" className="nav-link">管理</Link>
-              <Link to="/calibration" className="nav-link">キャリブレーション</Link>
-              <button onClick={handleLogout} className="nav-link logout-button">
-                ログアウト
-              </button>
-            </nav>
+            <NavBar onLogout={handleLogout} />
           </div>
         </header>
 
@@ -89,6 +82,35 @@ function App() {
         </Routes>
       </div>
     </Router>
+  );
+}
+
+// ナビゲーションバーコンポーネント
+function NavBar({ onLogout }: { onLogout: () => void }) {
+  const location = useLocation();
+
+  const isActive = (path: string) => {
+    if (path === '/') {
+      return location.pathname === '/';
+    }
+    return location.pathname.startsWith(path);
+  };
+
+  return (
+    <nav className="nav">
+      <Link to="/" className={`nav-link ${isActive('/') ? 'active' : ''}`}>
+        ホーム
+      </Link>
+      <Link to="/management" className={`nav-link ${isActive('/management') ? 'active' : ''}`}>
+        管理
+      </Link>
+      <Link to="/calibration" className={`nav-link ${isActive('/calibration') ? 'active' : ''}`}>
+        キャリブレーション
+      </Link>
+      <button onClick={onLogout} className="nav-link logout-button">
+        ログアウト
+      </button>
+    </nav>
   );
 }
 
