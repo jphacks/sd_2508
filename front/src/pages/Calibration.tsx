@@ -67,42 +67,58 @@ export default function Calibration() {
 
     setIsScanning(true);
     
-    // RTDBから最新のBLEスキャンデータを取得
-    const scansRef = ref(rtdb, `devices/${selectedDevice}/ble_scans`);
+    // RTDBから該当トラッカーのデータを監視
+    const trackerRef = ref(rtdb, `CARDS/${selectedDevice}`);
     
-    const listener = onValue(scansRef, (snapshot) => {
+    // 測定開始時のタイムスタンプを記録
+    let initialTimestamp: string | null = null;
+    
+    const listener = onValue(trackerRef, (snapshot) => {
       const data = snapshot.val();
-      if (data) {
-        const scans = Object.values(data) as any[];
-        const latestScan = scans[scans.length - 1];
+      
+      if (data && data.ble) {
+        const currentTimestamp = data.ts;
         
-        if (latestScan && latestScan.beacons) {
-          // RSSI値をマップに変換
-          const rssiMap: { [mac: string]: number } = {};
-          latestScan.beacons.forEach((beacon: any) => {
-            rssiMap[beacon.mac] = beacon.rssi;
+        // 初回の呼び出しでタイムスタンプを記録
+        if (initialTimestamp === null) {
+          initialTimestamp = currentTimestamp;
+          return;
+        }
+        
+        // タイムスタンプが更新されたら新しいデータと判定
+        if (currentTimestamp !== initialTimestamp) {
+          // 各ビーコンからRSSI値を取得して平均化
+          const rssiMap: { [beaconId: string]: number } = {};
+          
+          Object.entries(data.ble).forEach(([beaconId, beaconData]: [string, any]) => {
+            if (beaconData.rssi_data && Array.isArray(beaconData.rssi_data)) {
+              // rssi_data配列から平均RSSI値を計算
+              const rssiValues = beaconData.rssi_data.map((item: any) => item.rssi);
+              const averageRssi = rssiValues.reduce((sum: number, rssi: number) => sum + rssi, 0) / rssiValues.length;
+              rssiMap[beaconId] = averageRssi;
+            }
           });
           
           setCurrentMeasurement({
             deviceId: selectedDevice,
-            timestamp: latestScan.ts,
+            timestamp: currentTimestamp,
             rssiValues: rssiMap
           });
           
           setIsScanning(false);
-          off(scansRef);
+          off(trackerRef);
         }
       }
     });
 
-    // 10秒後にタイムアウト
+    // 60秒後にタイムアウト（トラッカーは1分間隔で送信するため）
     setTimeout(() => {
       if (isScanning) {
         setIsScanning(false);
-        off(scansRef);
-        alert('測定がタイムアウトしました。もう一度試してください。');
+        off(trackerRef);
+        alert('測定がタイムアウトしました。トラッカーがデータを送信するまで最大1分かかります。もう一度試してください。');
       }
-    }, 10000);
+    }, 65000);
   };
 
   const saveMeasurement = () => {
