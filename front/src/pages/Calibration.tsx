@@ -59,11 +59,11 @@ const TEST_ROOM = {
 const getFurnitureTypes = (roomWidth: number, roomHeight: number) => {
   // 基準サイズ（メートル）
   const baseSizes = {
-    desk: { width: 1, height: 0.5 },
-    tv: { width: 1, height: 0.1 },
-    piano: { width: 1, height: 0.5 },
-    chair: { width: 0.3, height: 0.3 },
-    door: { width: 0.5, height: 0.2 }
+    desk: { width: 0.3, height: 0.2 },
+    tv: { width: 0.3, height: 0.05 },
+    piano: { width: 0.2, height: 0.15 },
+    chair: { width: 0.05, height: 0.05 },
+    door: { width: 0.2, height: 0.05 }
   };
 
   // 正規化座標に変換
