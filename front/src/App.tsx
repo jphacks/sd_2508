@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import './styles.css';
 import 'leaflet/dist/leaflet.css';
 import { auth } from './firebase';
-import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 // Pages
 import Dashboard from './pages/Dashboard';
@@ -12,6 +12,7 @@ import Mode2Bus from './pages/Mode2Bus';
 import Mode3GPS from './pages/Mode3GPS';
 import Management from './pages/Management';
 import Calibration from './pages/Calibration';
+import Login from './pages/Login';
 import { AppMode } from './types';
 
 function App() {
@@ -22,23 +23,37 @@ function App() {
   useEffect(() => {
     // 認証状態の監視
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUser(user);
-      } else {
-        // 匿名ログイン
-        signInAnonymously(auth).catch(console.error);
-      }
+      setUser(user);
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('ログアウトエラー:', error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading">
         <div className="spinner"></div>
       </div>
+    );
+  }
+
+  // ログインしていない場合はログインページを表示
+  if (!user) {
+    return (
+      <Router>
+        <Routes>
+          <Route path="*" element={<Login />} />
+        </Routes>
+      </Router>
     );
   }
 
@@ -54,6 +69,9 @@ function App() {
               <Link to="/" className="nav-link">ホーム</Link>
               <Link to="/management" className="nav-link">管理</Link>
               <Link to="/calibration" className="nav-link">キャリブレーション</Link>
+              <button onClick={handleLogout} className="nav-link logout-button">
+                ログアウト
+              </button>
             </nav>
           </div>
         </header>
