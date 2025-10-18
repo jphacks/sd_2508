@@ -14,6 +14,9 @@ export default function Mode2Bus() {
   const [devices, setDevices] = useState(MOCK_DEVICES);
   const [alert, setAlert] = useState<string | null>(null);
   const [selectedBeacon, setSelectedBeacon] = useState<string>('beacon-1');
+  const [alertThreshold, setAlertThreshold] = useState(3);
+  const [alertEnabled, setAlertEnabled] = useState(true);
+  const [alertSound, setAlertSound] = useState(true);
 
   useEffect(() => {
     // モック: 3分以上単独検知のデバイスがいないかチェック
@@ -162,17 +165,73 @@ export default function Mode2Bus() {
             <input
               type="number"
               className="form-input"
-              defaultValue={3}
+              value={alertThreshold}
+              onChange={(e) => setAlertThreshold(Number(e.target.value))}
               min={1}
               max={10}
             />
           </div>
           <div className="form-group">
             <label className="form-label">単独検知時の警告</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" defaultChecked />
-              有効
-            </label>
+            <button
+              onClick={() => setAlertEnabled(!alertEnabled)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 16px',
+                borderRadius: '20px',
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backgroundColor: alertEnabled ? '#50C878' : '#E0E0E0',
+                color: alertEnabled ? 'white' : '#666'
+              }}
+            >
+              <div
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: 'white',
+                  transition: 'transform 0.3s ease'
+                }}
+              />
+              {alertEnabled ? '有効' : '無効'}
+            </button>
+          </div>
+          <div className="form-group">
+            <label className="form-label">警告音</label>
+            <button
+              onClick={() => setAlertSound(!alertSound)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 16px',
+                borderRadius: '20px',
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                backgroundColor: alertSound ? '#50C878' : '#E0E0E0',
+                color: alertSound ? 'white' : '#666'
+              }}
+            >
+              <div
+                style={{
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: 'white',
+                  transition: 'transform 0.3s ease'
+                }}
+              />
+              {alertSound ? '有効' : '無効'}
+            </button>
           </div>
         </div>
       </div>
