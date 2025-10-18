@@ -12,6 +12,8 @@ export default function Mode1Indoor() {
   const [deviceTimestamps, setDeviceTimestamps] = useState<Map<string, string>>(new Map());
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alertOnExit, setAlertOnExit] = useState(true);
+  const [alertSound, setAlertSound] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -416,17 +418,67 @@ export default function Mode1Indoor() {
             <h3 style={{ marginBottom: '12px' }}>設定</h3>
             <div className="form-group">
               <label className="form-label">部屋退出時の警告</label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input type="checkbox" defaultChecked />
-                有効
-              </label>
+              <button
+                onClick={() => setAlertOnExit(!alertOnExit)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: alertOnExit ? '#50C878' : '#E0E0E0',
+                  color: alertOnExit ? 'white' : '#666'
+                }}
+              >
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: 'white',
+                    transition: 'transform 0.3s ease',
+                    transform: alertOnExit ? 'translateX(0)' : 'translateX(0)'
+                  }}
+                />
+                {alertOnExit ? '有効' : '無効'}
+              </button>
             </div>
             <div className="form-group">
               <label className="form-label">警告音</label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input type="checkbox" defaultChecked />
-                有効
-              </label>
+              <button
+                onClick={() => setAlertSound(!alertSound)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: alertSound ? '#50C878' : '#E0E0E0',
+                  color: alertSound ? 'white' : '#666'
+                }}
+              >
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: 'white',
+                    transition: 'transform 0.3s ease',
+                    transform: alertSound ? 'translateX(0)' : 'translateX(0)'
+                  }}
+                />
+                {alertSound ? '有効' : '無効'}
+              </button>
             </div>
           </div>
         </div>
