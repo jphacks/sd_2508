@@ -68,7 +68,7 @@ export default function Management() {
     
     const newBeacon: Partial<Beacon> = {
       beaconId: formData.get('beaconId') as string,
-      name: formData.get('name') as string,
+      // name: formData.get('name') as string,
       mac: formData.get('mac') as string,
       type: 'ibeacon',
       txPower: Number(formData.get('txPower')) || -59,
@@ -277,7 +277,6 @@ export default function Management() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
-                      <th style={{ padding: '12px' }}>名前</th>
                       <th style={{ padding: '12px' }}>MACアドレス</th>
                       <th style={{ padding: '12px' }}>送信電力</th>
                       <th style={{ padding: '12px' }}>操作</th>
@@ -286,7 +285,6 @@ export default function Management() {
                   <tbody>
                     {beacons.map(beacon => (
                       <tr key={beacon.beaconId} style={{ borderBottom: '1px solid #e1e8ed' }}>
-                        <td style={{ padding: '12px' }}><strong>{beacon.name || '未設定'}</strong></td>
                         <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
                           {beacon.mac}
                         </td>
@@ -322,7 +320,7 @@ export default function Management() {
                     required
                   />
                 </div>
-                <div className="form-group">
+                {/* <div className="form-group">
                   <label className="form-label">名前 *</label>
                   <input
                     type="text"
@@ -331,7 +329,7 @@ export default function Management() {
                     placeholder="例: ビーコン1"
                     required
                   />
-                </div>
+                </div> */}
                 <div className="form-group">
                   <label className="form-label">MACアドレス *</label>
                   <input
