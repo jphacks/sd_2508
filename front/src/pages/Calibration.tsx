@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { collection, getDocs, addDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
@@ -43,6 +43,7 @@ type FurnitureType = keyof typeof FURNITURE_TYPES;
 export default function Calibration() {
   const { mode, roomId } = useParams<{ mode: string; roomId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   
   const [step, setStep] = useState(0);
   const [roomName, setRoomName] = useState('');
@@ -68,21 +69,36 @@ export default function Calibration() {
   const [roomWidth, setRoomWidth] = useState<string>('');
   const [roomHeight, setRoomHeight] = useState<string>('');
 
+  // 家具編集モードかどうかを判定
+  const isFurnitureEditMode = location.pathname.includes('/edit-furniture/');
   const [isEditMode, setIsEditMode] = useState(false); // 編集モードかどうか
   const [originalRoomData, setOriginalRoomData] = useState<RoomProfile | null>(null);
 
+  
+
 
   useEffect(() => {
-    loadDevices();
-    loadBeacons();
-
-    // 編集モードの場合、既存のルームデータを読み込み
-    if (mode === 'furniture' && roomId) {
-      loadRoomData(roomId);
+    console.log('useEffect triggered');
+    console.log('Furniture count:', furniture.length);
+    console.log('Selected furniture:', selectedFurniture);
+    
+    if (devices.length === 0) {
+      loadDevices();
+    }
+    if (beacons.length === 0) {
+      loadBeacons();
     }
 
-    drawMap();//(追加)マップ描写関数
-  }, [furniture, selectedFurniture, mode, roomId]); // furnitureやselectedFurnitureが変わるたびに再描画
+    // 編集モードの場合、既存のルームデータを読み込み（一度だけ）
+    if ((mode === 'furniture' && roomId) || isFurnitureEditMode) {
+      if (!originalRoomData) {
+        loadRoomData(roomId!);
+        return; // データ読み込み中は描画しない
+      }
+    }
+
+    drawMap();
+  }, [furniture, selectedFurniture, originalRoomData]);
 
   const loadDevices = async () => {
     const snapshot = await getDocs(collection(db, 'devices'));
@@ -105,14 +121,20 @@ export default function Calibration() {
         setCalibrationPoints(roomData.calibrationPoints || []);
         setIsEditMode(true);
         setShowFurniture(true);
+        
+        // TEST_ROOMのサイズを実際のルームサイズに更新
+        if (roomData.outline) {
+          TEST_ROOM.width = roomData.outline.width;
+          TEST_ROOM.height = roomData.outline.height;
+        }
       } else {
         alert('ルームが見つかりません');
-        navigate('/rooms');
+        navigate('/management');
       }
     } catch (error) {
       console.error('ルーム読み込みエラー:', error);
       alert('ルームの読み込みに失敗しました');
-      navigate('/rooms');
+      navigate('/management');
     }
   };
 
@@ -223,19 +245,21 @@ export default function Calibration() {
 };
 
   const addFurniture = (type: FurnitureType) => {
+    console.log('addFurniture called with type:', type);
     const furnitureType = FURNITURE_TYPES[type];
     const newItem: FurnitureItem = {
       id: `furniture-${Date.now()}`,
       type,
-      position: { x: 2, y: 2 }, // デフォルト位置
+      position: { x: 2, y: 2 },
       width: furnitureType.width,
       height: furnitureType.height
     };
     
-    console.log('Adding furniture:', newItem); // デバッグ用
+    console.log('Adding furniture:', newItem);
     setFurniture(prev => {
       const updated = [...prev, newItem];
-      console.log('Updated furniture list:', updated); // デバッグ用
+      console.log('Updated furniture list:', updated);
+      console.log('Previous furniture list:', prev);
       return updated;
     });
     setSelectedFurniture(newItem.id);
@@ -291,22 +315,30 @@ export default function Calibration() {
       name: roomName,
       beacons: selectedBeacons,
       calibrationPoints: calibrationPoints,
-      outline: parsedWidth && parsedHeight 
-        ? { width: parsedWidth, height: parsedHeight }
-        : undefined, // サイズ未入力の場合はundefined
-      furniture: normalizedFurniture,
-      beaconPositions: normalizedBeacons, // ビーコン位置を正規化して保存
-      createdAt: new Date().toISOString(),
+      outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
+      furniture: furniture,
+      createdAt: originalRoomData?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     try {
-      await addDoc(collection(db, 'rooms'), roomProfile);
-      const sizeInfo = parsedWidth && parsedHeight 
-        ? `（${parsedWidth}m × ${parsedHeight}m）` 
-        : '（正規化座標で保存）';
-      alert(`「${roomName}」の家具配置が保存されました！${sizeInfo}`);
-      navigate('/mode1');
+      if (isEditMode && roomId) {
+        // 編集モード：既存のドキュメントを更新
+        await updateDoc(doc(db, 'rooms', roomId), roomProfile);
+        alert(`「${roomName}」の家具配置が更新されました！`);
+        
+        // 家具編集モードの場合は EditRoom に戻る
+        if (isFurnitureEditMode) {
+          navigate(`/edit-room/${roomId}`);
+        } else {
+          navigate('/mode1');
+        }
+      } else {
+        // 新規作成モード
+        await addDoc(collection(db, 'rooms'), roomProfile);
+        alert(`「${roomName}」の家具配置が保存されました！`);
+        navigate('/mode1');
+      }
     } catch (error) {
       console.error('保存エラー:', error);
       alert('保存に失敗しました');
@@ -388,10 +420,24 @@ export default function Calibration() {
     const canvas = canvasRef.current;
     if (!canvas || !selectedFurniture) return;
 
+    console.log('Mouse move - isDragging:', isDragging, 'isResizing:', isResizing);
+
     const rect = canvas.getBoundingClientRect();
     const scale = 40;
     const mouseX = (e.clientX - rect.left) / scale;
     const mouseY = (e.clientY - rect.top) / scale;
+
+    if (isDragging && !isResizing) {
+      console.log('Dragging furniture to:', { mouseX, mouseY });
+      const x = Math.max(0, Math.min(TEST_ROOM.width - 1, mouseX));
+      const y = Math.max(0, Math.min(TEST_ROOM.height - 1, mouseY));
+
+      setFurniture(prev => prev.map(item =>
+        item.id === selectedFurniture
+          ? { ...item, position: { x, y } }
+          : item
+      ));
+    }
 
     if (isResizing && resizeHandle && originalSize) {
       const selectedItem = furniture.find(f => f.id === selectedFurniture);
@@ -836,16 +882,37 @@ export default function Calibration() {
   //   </div>
   // );
 
-  if (showFurniture) {
+  if (showFurniture || isFurnitureEditMode) {
     return (
       <div className="container">
-        <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-          {isEditMode ? '家具配置の編集' : '家具とオブジェクトの配置'}
-        </h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '32px', fontWeight: '700' }}>
+            {isFurnitureEditMode ? `家具配置の編集: ${roomName}` : isEditMode ? '家具配置の編集' : '家具とオブジェクトの配置'}
+          </h1>
+          {isFurnitureEditMode && (
+            <button 
+              className="btn btn-outline"
+              onClick={() => navigate(`/edit-room/${roomId}`)}
+            >
+              ← ルーム編集に戻る
+            </button>
+          )}
+        </div>
 
         <div style={{ display: 'flex', gap: '24px' }}>
           {/* 左側: コントロールパネル */}
           <div style={{ width: '300px' }}>
+            {(isEditMode || isFurnitureEditMode) && (
+              <div className="card" style={{ marginBottom: '16px', backgroundColor: '#FFF3CD', border: '1px solid #FFEAA7' }}>
+                <h3 style={{ marginBottom: '12px', color: '#856404' }}>編集モード</h3>
+                <p style={{ fontSize: '14px', color: '#856404', margin: 0 }}>
+                  「{roomName}」の家具配置を編集しています
+                </p>
+              </div>
+            )}
+
+
+
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>部屋サイズ（オプション）</h3>
               <p style={{ fontSize: '14px', color: '#7f8c8d', marginBottom: '12px' }}>
@@ -953,11 +1020,19 @@ export default function Calibration() {
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
               <button className="btn btn-primary" onClick={saveCalibration}>
-                {isEditMode ? '更新' : '保存'}
+                {isEditMode || isFurnitureEditMode ? '更新' : '保存'}
               </button>
               <button 
                 className="btn btn-outline" 
-                onClick={() => navigate(isEditMode ? '/rooms' : '/mode1')}
+                onClick={() => {
+                  if (isFurnitureEditMode) {
+                    navigate(`/edit-room/${roomId}`);
+                  } else if (isEditMode) {
+                    navigate('/management');
+                  } else {
+                    navigate('/mode1');
+                  }
+                }}
               >
                 キャンセル
               </button>
@@ -966,13 +1041,15 @@ export default function Calibration() {
 
           {/* 右側: マップ */}
           <div className="card" style={{ flex: 1 }}>
-            <h3 style={{ marginBottom: '16px' }}>{TEST_ROOM.name} (10m × 8m)</h3>
+            <h3 style={{ marginBottom: '16px' }}>
+              {roomName || TEST_ROOM.name} ({TEST_ROOM.width}m × {TEST_ROOM.height}m)
+            </h3>
             <canvas
               ref={canvasRef}
               style={{
                 border: '2px solid #E1E8ED',
                 borderRadius: '8px',
-                cursor: isDragging ? 'grabbing' : 'pointer'
+                cursor: isDragging ? 'grabbing' : selectedFurniture ? 'move' : 'pointer'
               }}
               onClick={handleCanvasClick}
               onMouseDown={handleCanvasMouseDown}
@@ -983,7 +1060,7 @@ export default function Calibration() {
             {selectedFurniture && (
               <p style={{ marginTop: '12px', fontSize: '14px', color: '#4A90E2' }}>
                 選択中: {FURNITURE_TYPES[furniture.find(f => f.id === selectedFurniture)?.type as FurnitureType || 'desk'].label}
-                （ドラッグして移動できます）
+                （ドラッグして移動、角をドラッグでサイズ変更）
               </p>
             )}
           </div>

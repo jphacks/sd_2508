@@ -210,13 +210,13 @@ export default function CalibrationRoomList() {
                       >
                         編集
                       </button>
-                      <button
+                      {/* <button
                         className="btn btn-outline"
                         style={{ padding: '6px 9px', fontSize: '10px', backgroundColor: '#FFF3CD', borderColor: '#FFEAA7', color: '#856404' }}
                         onClick={() => handleEditFurniture(room.id)}
                       >
                         家具編集
-                      </button>
+                      </button> */}
                       <button
                         className="btn btn-danger"
                         style={{ padding: '6px 9px', fontSize: '10px' }}

@@ -232,23 +232,54 @@ export default function EditRoom() {
         )}
       </div>
 
-      {/* 家具情報 */}
-      {room.furniture && room.furniture.length > 0 && (
-        <div className="card">
-          <h2 style={{ marginBottom: '16px' }}>🪑 配置されている家具</h2>
-          <p style={{ marginBottom: '8px' }}>
-            <strong>家具数:</strong> {room.furniture.length}個
-          </p>
-          <ul style={{ paddingLeft: '20px', lineHeight: '1.8', fontSize: '14px' }}>
-            {room.furniture.map((item, index) => (
-              <li key={item.id || index}>
-                {item.type} - 
-                位置: ({(item.position.x * 100).toFixed(0)}%, {(item.position.y * 100).toFixed(0)}%)
-              </li>
-            ))}
-          </ul>
+      {/* 家具情報と編集ボタン */}
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2>🪑 家具とオブジェクトの配置</h2>
+          <button
+            className="btn btn-primary"
+            onClick={() => navigate(`/edit-furniture/${roomId}`)}
+          >
+            家具配置を編集
+          </button>
         </div>
-      )}
+        
+        {room.furniture && room.furniture.length > 0 ? (
+          <>
+            <p style={{ marginBottom: '12px' }}>
+              <strong>配置済み家具:</strong> {room.furniture.length}個
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', marginBottom: '16px' }}>
+              {room.furniture.map((item, index) => (
+                <div
+                  key={item.id || index}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#F8F9FA',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    border: '1px solid #E1E8ED'
+                  }}
+                >
+                  <strong>{item.type}</strong><br />
+                  位置: ({item.position.x.toFixed(1)}, {item.position.y.toFixed(1)})<br />
+                  サイズ: {item.width.toFixed(1)} × {item.height.toFixed(1)}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#7f8c8d' }}>
+            <p style={{ marginBottom: '16px' }}>まだ家具が配置されていません</p>
+            <button
+              className="btn btn-outline"
+              onClick={() => navigate(`/edit-furniture/${roomId}`)}
+            >
+              家具配置を開始
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* ヒント */}
       <div className="card" style={{ marginTop: '24px' }}>
