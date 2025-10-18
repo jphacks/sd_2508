@@ -67,8 +67,8 @@ export default function Management() {
     const formData = new FormData(e.currentTarget);
     
     const newBeacon: Partial<Beacon> = {
-      beaconId: formData.get('beaconId') as string,
-      // name: formData.get('name') as string,
+      // beaconId: formData.get('beaconId') as string,
+      name: formData.get('name') as string,
       mac: formData.get('mac') as string,
       type: 'ibeacon',
       txPower: Number(formData.get('txPower')) || -59,
@@ -277,6 +277,7 @@ export default function Management() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
+                      <th style={{ padding: '12px' }}>ビーコン名</th>
                       <th style={{ padding: '12px' }}>MACアドレス</th>
                       <th style={{ padding: '12px' }}>RSSI@1m</th>
                       <th style={{ padding: '12px' }}>操作</th>
@@ -285,6 +286,7 @@ export default function Management() {
                   <tbody>
                     {beacons.map(beacon => (
                       <tr key={beacon.beaconId} style={{ borderBottom: '1px solid #e1e8ed' }}>
+                        <td style={{ padding: '12px' }}>{beacon.name || '未設定'}</td>
                         <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
                           {beacon.mac}
                         </td>
@@ -310,8 +312,8 @@ export default function Management() {
             <div className="card">
               <h3 style={{ marginBottom: '16px' }}>新しいビーコンを追加</h3>
               <form onSubmit={handleAddBeacon}>
-                <div className="form-group">
-                  <label className="form-label">ビーコンID *</label>
+                {/* <div className="form-group">
+                  <label className="form-label"> *</label>
                   <input
                     type="text"
                     name="beaconId"
@@ -319,8 +321,8 @@ export default function Management() {
                     placeholder="例: beacon-001"
                     required
                   />
-                </div>
-                {/* <div className="form-group">
+                </div> */}
+                <div className="form-group">
                   <label className="form-label">名前 *</label>
                   <input
                     type="text"
@@ -329,7 +331,7 @@ export default function Management() {
                     placeholder="例: ビーコン1"
                     required
                   />
-                </div> */}
+                </div>
                 <div className="form-group">
                   <label className="form-label">MACアドレス *</label>
                   <input
