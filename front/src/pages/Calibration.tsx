@@ -24,7 +24,7 @@ export default function Calibration() {
   const [selectedBeacons, setSelectedBeacons] = useState<string[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [devices, setDevices] = useState<Device[]>([]);
-  const [beacons, setBeacons] = useState<Beacon[]>([]);
+  const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
   const [currentMeasurement, setCurrentMeasurement] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -53,8 +53,8 @@ export default function Calibration() {
       return {
         ...raw,
         rssiAt1m: raw.rssiAt1m ?? -59,
-        beaconId: doc.id
-      } as Beacon;
+        firestoreId: doc.id // Firestoreの自動生成IDを別プロパティとして保持
+      } as Beacon & { firestoreId: string };
     });
     setBeacons(data);
   };
@@ -187,8 +187,8 @@ export default function Calibration() {
             <select className="form-select">
               <option value="">選択してください</option>
               {beacons.map(beacon => (
-                <option key={beacon.beaconId} value={beacon.beaconId}>
-                  {beacon.name || beacon.beaconId}
+                <option key={beacon.firestoreId} value={beacon.firestoreId}>
+                  {beacon.beaconId || beacon.name || beacon.firestoreId}
                 </option>
               ))}
             </select>
@@ -245,20 +245,20 @@ export default function Calibration() {
             <div className="form-group">
               <label className="form-label">使用するビーコン（3台選択） *</label>
               {beacons.map(beacon => (
-                <label key={beacon.beaconId} style={{ display: 'block', marginBottom: '8px' }}>
+                <label key={beacon.firestoreId} style={{ display: 'block', marginBottom: '8px' }}>
                   <input
                     type="checkbox"
-                    checked={selectedBeacons.includes(beacon.beaconId)}
+                    checked={selectedBeacons.includes(beacon.firestoreId)}
                     onChange={(e) => {
                       if (e.target.checked && selectedBeacons.length < 3) {
-                        setSelectedBeacons([...selectedBeacons, beacon.beaconId]);
+                        setSelectedBeacons([...selectedBeacons, beacon.firestoreId]);
                       } else if (!e.target.checked) {
-                        setSelectedBeacons(selectedBeacons.filter(id => id !== beacon.beaconId));
+                        setSelectedBeacons(selectedBeacons.filter(id => id !== beacon.firestoreId));
                       }
                     }}
-                    disabled={!selectedBeacons.includes(beacon.beaconId) && selectedBeacons.length >= 3}
+                    disabled={!selectedBeacons.includes(beacon.firestoreId) && selectedBeacons.length >= 3}
                   />
-                  {' '}{beacon.name || beacon.beaconId}
+                  {' '}{beacon.beaconId || beacon.name || beacon.firestoreId}
                 </label>
               ))}
             </div>
