@@ -85,10 +85,17 @@ export default function Mode1Indoor() {
 
           // 各デバイスのBLEスキャンデータを監視
           devicesData.forEach(device => {
-            const trackerRef = ref(rtdb, `devices/${device.devEUI}`);
+            // デバイスIDを小文字に正規化（RTDBと一致させる）
+            const normalizedDeviceId = device.devEUI.toLowerCase();
+            const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+            
+            console.log(`📍 Mode1: ${device.deviceId}の監視開始`, { devEUI: device.devEUI, normalized: normalizedDeviceId });
+            
             onValue(trackerRef, (snapshot) => {
               const data = snapshot.val();
               if (data && data.beacons && roomData) {
+                console.log(`📡 ${device.deviceId}のRTDB更新:`, { timestamp: data.beaconsUpdatedAt, beaconsCount: data.beacons.length });
+                
                 // タイムスタンプを保存
                 if (data.beaconsUpdatedAt) {
                   setDeviceTimestamps(prev => {
@@ -108,6 +115,8 @@ export default function Mode1Indoor() {
                     rssiMap[normalizedMac] = beacon.rssi;
                   }
                 });
+                
+                console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
 
                 // ハイブリッド位置推定（Fingerprinting + 三辺測量）
                 const position = estimatePositionHybrid(

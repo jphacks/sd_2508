@@ -440,25 +440,34 @@ export default function Calibration() {
     setIsScanning(true);
     
     // RTDBから該当トラッカーのデータを監視
-    const trackerRef = ref(rtdb, `devices/${selectedDevice}`);
+    // デバイスIDを小文字に正規化（RTDBと一致させる）
+    const normalizedDeviceId = selectedDevice.toLowerCase();
+    const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+    
+    console.log('📍 測定開始:', { selectedDevice, normalizedDeviceId, path: `devices/${normalizedDeviceId}` });
     
     // 測定開始時のタイムスタンプを記録
     let initialTimestamp: string | null = null;
     
     const listener = onValue(trackerRef, (snapshot) => {
       const data = snapshot.val();
+      console.log('📡 RTDB更新検知:', { data, timestamp: data?.beaconsUpdatedAt });
       
       if (data && data.beacons) {
         const currentTimestamp = data.beaconsUpdatedAt;
+        console.log('⏰ タイムスタンプ比較:', { initialTimestamp, currentTimestamp, isNew: currentTimestamp !== initialTimestamp });
         
         // 初回の呼び出しでタイムスタンプを記録
         if (initialTimestamp === null) {
           initialTimestamp = currentTimestamp;
+          console.log('✅ 初回タイムスタンプ記録:', initialTimestamp);
           return;
         }
         
         // タイムスタンプが更新されたら新しいデータと判定
         if (currentTimestamp !== initialTimestamp) {
+          console.log('🎯 新しいデータ検知！測定完了');
+          
           // 各ビーコンからRSSI値を取得
           const rssiMap: { [beaconId: string]: number } = {};
           
@@ -470,6 +479,8 @@ export default function Calibration() {
             }
           });
           
+          console.log('📊 取得したRSSI値:', rssiMap);
+          
           setCurrentMeasurement({
             deviceId: selectedDevice,
             timestamp: currentTimestamp,
@@ -479,12 +490,18 @@ export default function Calibration() {
           setIsScanning(false);
           off(trackerRef);
         }
+      } else {
+        console.log('⚠️ beaconsデータが見つかりません', data);
       }
+    }, (error) => {
+      console.error('❌ RTDB読み込みエラー:', error);
+      setIsScanning(false);
     });
 
     // 60秒後にタイムアウト（トラッカーは1分間隔で送信するため）
     setTimeout(() => {
       if (isScanning) {
+        console.log('⏱️ 測定がタイムアウト');
         setIsScanning(false);
         off(trackerRef);
         alert('測定がタイムアウトしました。トラッカーがデータを送信するまで最大1分かかります。もう一度試してください。');
