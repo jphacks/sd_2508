@@ -9,6 +9,8 @@ export default function Management() {
   const [beacons, setBeacons] = useState<Beacon[]>([]);
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [showAddBeacon, setShowAddBeacon] = useState(false);
+  const [editingBeaconId, setEditingBeaconId] = useState<string | null>(null);
+  const [editRssiAt1m, setEditRssiAt1m] = useState<string>('');
 
   useEffect(() => {
     loadDevices();
@@ -31,7 +33,14 @@ export default function Management() {
   const loadBeacons = async () => {
     try {
       const snapshot = await getDocs(collection(db, 'beacons'));
-      const data = snapshot.docs.map(doc => ({ ...doc.data(), beaconId: doc.id } as Beacon));
+      const data = snapshot.docs.map(doc => {
+        const raw = doc.data() as Beacon;
+        return {
+          ...raw,
+          rssiAt1m: raw.rssiAt1m ?? -59,
+          beaconId: doc.id
+        } as Beacon;
+      });
       setBeacons(data);
     } catch (error) {
       console.error('ビーコン読み込みエラー:', error);
@@ -65,13 +74,15 @@ export default function Management() {
   const handleAddBeacon = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    
+    const parsedRssi = Number(formData.get('rssiAt1m'));
+    const referenceRssi = Number.isFinite(parsedRssi) ? parsedRssi : -59;
+
     const newBeacon: Partial<Beacon> = {
       // beaconId: formData.get('beaconId') as string,
       name: formData.get('name') as string,
       mac: formData.get('mac') as string,
       type: 'ibeacon',
-      txPower: Number(formData.get('txPower')) || -59,
+      rssiAt1m: referenceRssi,
       tags: []
     };
 
@@ -106,6 +117,44 @@ export default function Management() {
     } catch (error) {
       console.error('ビーコン削除エラー:', error);
       alert('ビーコンの削除に失敗しました');
+    }
+  };
+
+  const startEditBeacon = (beacon: Beacon) => {
+    setEditingBeaconId(beacon.beaconId);
+    const initialValue = (beacon.rssiAt1m ?? -59).toString();
+    setEditRssiAt1m(initialValue);
+  };
+
+  const cancelEditBeacon = () => {
+    setEditingBeaconId(null);
+    setEditRssiAt1m('');
+  };
+
+  const handleUpdateBeaconReferenceRssi = async () => {
+    if (!editingBeaconId) return;
+
+    const trimmedValue = editRssiAt1m.trim();
+    if (trimmedValue === '') {
+      alert('RSSI@1mの値を入力してください');
+      return;
+    }
+
+    const newReferenceRssi = Number(trimmedValue);
+    if (!Number.isFinite(newReferenceRssi)) {
+      alert('RSSI@1mの値が正しくありません');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'beacons', editingBeaconId), {
+        rssiAt1m: newReferenceRssi
+      });
+      cancelEditBeacon();
+      loadBeacons();
+    } catch (error) {
+      console.error('ビーコン更新エラー:', error);
+      alert('RSSI@1mの更新に失敗しました');
     }
   };
 
@@ -284,24 +333,67 @@ export default function Management() {
                     </tr>
                   </thead>
                   <tbody>
-                    {beacons.map(beacon => (
-                      <tr key={beacon.beaconId} style={{ borderBottom: '1px solid #e1e8ed' }}>
-                        <td style={{ padding: '12px' }}>{beacon.name || '未設定'}</td>
-                        <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
-                          {beacon.mac}
-                        </td>
-                        <td style={{ padding: '12px' }}>{beacon.txPower} dBm</td>
-                        <td style={{ padding: '12px' }}>
-                          <button
-                            className="btn btn-danger"
-                            style={{ padding: '6px 12px', fontSize: '14px' }}
-                            onClick={() => handleDeleteBeacon(beacon.beaconId)}
-                          >
-                            削除
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {beacons.map(beacon => {
+                      const isEditing = editingBeaconId === beacon.beaconId;
+                      const displayRssi = beacon.rssiAt1m;
+                      return (
+                        <tr key={beacon.beaconId} style={{ borderBottom: '1px solid #e1e8ed' }}>
+                          <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
+                            {beacon.mac}
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                value={editRssiAt1m}
+                                onChange={e => setEditRssiAt1m(e.target.value)}
+                                className="form-input"
+                                style={{ width: '140px' }}
+                              />
+                            ) : (
+                              displayRssi !== undefined ? `${displayRssi} dBm` : '未設定'
+                            )}
+                          </td>
+                          <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="btn btn-primary"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={handleUpdateBeaconReferenceRssi}
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={cancelEditBeacon}
+                                >
+                                  キャンセル
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={() => startEditBeacon(beacon)}
+                                >
+                                  編集
+                                </button>
+                                <button
+                                  className="btn btn-danger"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={() => handleDeleteBeacon(beacon.beaconId)}
+                                >
+                                  削除
+                                </button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -346,7 +438,7 @@ export default function Management() {
                   <label className="form-label">RSSI@1m（dBm）*</label>
                   <input
                     type="number"
-                    name="txPower"
+                    name="rssiAt1m"
                     className="form-input"
                     defaultValue={-59}
                     placeholder="例: -59"

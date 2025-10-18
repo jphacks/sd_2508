@@ -48,7 +48,14 @@ export default function Calibration() {
 
   const loadBeacons = async () => {
     const snapshot = await getDocs(collection(db, 'beacons'));
-    const data = snapshot.docs.map(doc => ({ ...doc.data(), beaconId: doc.id } as Beacon));
+    const data = snapshot.docs.map(doc => {
+      const raw = doc.data() as Beacon;
+      return {
+        ...raw,
+        rssiAt1m: raw.rssiAt1m ?? -59,
+        beaconId: doc.id
+      } as Beacon;
+    });
     setBeacons(data);
   };
 

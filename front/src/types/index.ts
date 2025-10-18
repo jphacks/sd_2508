@@ -22,7 +22,7 @@ export interface Beacon {
   major?: number;
   minor?: number;
   type: 'ibeacon' | 'eddystone' | 'raw';
-  txPower: number;
+  rssiAt1m?: number;
   place?: { x: number; y: number };
   anchor_loc?: { lat: number; lon: number };
   tags?: string[];

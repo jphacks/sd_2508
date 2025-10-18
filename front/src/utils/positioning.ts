@@ -3,14 +3,14 @@ import { CalibrationPoint } from '../types';
 /**
  * RSSI値から距離を推定（対数距離減衰モデル）
  * @param rssi 受信信号強度
- * @param txPower 送信電力（通常-59dBm）
+ * @param referenceRssi RSSI@1mの参照値（通常-59dBm）
  * @param n 環境係数（2-4、室内は通常3程度）
  */
-export function rssiToDistance(rssi: number, txPower: number = -59, n: number = 3): number {
+export function rssiToDistance(rssi: number, referenceRssi: number = -59, n: number = 3): number {
   if (rssi === 0) {
     return -1; // 無効な値
   }
-  const ratio = (txPower - rssi) / (10 * n);
+  const ratio = (referenceRssi - rssi) / (10 * n);
   return Math.pow(10, ratio);
 }
 
@@ -91,7 +91,7 @@ export function estimatePositionByFingerprinting(
 export function estimatePositionByTrilateration(
   beaconPositions: Array<{ x: number; y: number; mac: string }>,
   rssiValues: { [beaconMac: string]: number },
-  txPower: number = -59
+  referenceRssi: number = -59
 ): { x: number; y: number } | null {
   // 3つ以上のビーコンが必要
   const validBeacons = beaconPositions.filter(b => rssiValues[b.mac] !== undefined);
@@ -103,7 +103,7 @@ export function estimatePositionByTrilateration(
   // 距離を計算
   const distances = validBeacons.map(beacon => ({
     ...beacon,
-    distance: rssiToDistance(rssiValues[beacon.mac], txPower)
+    distance: rssiToDistance(rssiValues[beacon.mac], referenceRssi)
   }));
 
   // 最初の3つのビーコンを使用
