@@ -85,28 +85,27 @@ export default function Mode1Indoor() {
 
           // 各デバイスのBLEスキャンデータを監視
           devicesData.forEach(device => {
-            const trackerRef = ref(rtdb, `CARDS/${device.devEUI}`);
+            const trackerRef = ref(rtdb, `devices/${device.devEUI}`);
             onValue(trackerRef, (snapshot) => {
               const data = snapshot.val();
-              if (data && data.ble && roomData) {
+              if (data && data.beacons && roomData) {
                 // タイムスタンプを保存
-                if (data.ts) {
+                if (data.beaconsUpdatedAt) {
                   setDeviceTimestamps(prev => {
                     const newMap = new Map(prev);
-                    newMap.set(device.devEUI, data.ts);
+                    newMap.set(device.devEUI, data.beaconsUpdatedAt);
                     return newMap;
                   });
                 }
 
-                // 各ビーコンからRSSI値を取得して平均化
+                // 各ビーコンからRSSI値を取得
                 const rssiMap: { [beaconId: string]: number } = {};
                 
-                Object.entries(data.ble).forEach(([beaconId, beaconData]: [string, any]) => {
-                  if (beaconData.rssi_data && Array.isArray(beaconData.rssi_data)) {
-                    // rssi_data配列から平均RSSI値を計算
-                    const rssiValues = beaconData.rssi_data.map((item: any) => item.rssi);
-                    const averageRssi = rssiValues.reduce((sum: number, rssi: number) => sum + rssi, 0) / rssiValues.length;
-                    rssiMap[beaconId] = averageRssi;
+                data.beacons.forEach((beacon: any) => {
+                  if (beacon.mac && beacon.rssi) {
+                    // MACアドレスを正規化（コロン区切りを大文字に統一）
+                    const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, '');
+                    rssiMap[normalizedMac] = beacon.rssi;
                   }
                 });
 

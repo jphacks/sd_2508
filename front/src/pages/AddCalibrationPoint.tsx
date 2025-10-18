@@ -212,7 +212,7 @@ export default function AddCalibrationPoint() {
     setIsScanning(true);
     
     // RTDBから該当トラッカーのデータを監視
-    const trackerRef = ref(rtdb, `CARDS/${selectedDevice}`);
+    const trackerRef = ref(rtdb, `devices/${selectedDevice}`);
     
     // 測定開始時のタイムスタンプを記録
     let initialTimestamp: string | null = null;
@@ -220,8 +220,8 @@ export default function AddCalibrationPoint() {
     const listener = onValue(trackerRef, (snapshot) => {
       const data = snapshot.val();
       
-      if (data && data.ble) {
-        const currentTimestamp = data.ts;
+      if (data && data.beacons) {
+        const currentTimestamp = data.beaconsUpdatedAt;
         
         // 初回の呼び出しでタイムスタンプを記録
         if (initialTimestamp === null) {
@@ -231,15 +231,14 @@ export default function AddCalibrationPoint() {
         
         // タイムスタンプが更新されたら新しいデータと判定
         if (currentTimestamp !== initialTimestamp) {
-          // 各ビーコンからRSSI値を取得して平均化
+          // 各ビーコンからRSSI値を取得
           const rssiMap: { [beaconId: string]: number } = {};
           
-          Object.entries(data.ble).forEach(([beaconId, beaconData]: [string, any]) => {
-            if (beaconData.rssi_data && Array.isArray(beaconData.rssi_data)) {
-              // rssi_data配列から平均RSSI値を計算
-              const rssiValues = beaconData.rssi_data.map((item: any) => item.rssi);
-              const averageRssi = rssiValues.reduce((sum: number, rssi: number) => sum + rssi, 0) / rssiValues.length;
-              rssiMap[beaconId] = averageRssi;
+          data.beacons.forEach((beacon: any) => {
+            if (beacon.mac && beacon.rssi) {
+              // MACアドレスを正規化（コロン区切りを大文字に統一）
+              const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, '');
+              rssiMap[normalizedMac] = beacon.rssi;
             }
           });
           
