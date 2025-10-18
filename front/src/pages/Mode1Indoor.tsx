@@ -85,30 +85,38 @@ export default function Mode1Indoor() {
 
           // 各デバイスのBLEスキャンデータを監視
           devicesData.forEach(device => {
-            const trackerRef = ref(rtdb, `CARDS/${device.devEUI}`);
+            // デバイスIDを小文字に正規化（RTDBと一致させる）
+            const normalizedDeviceId = device.devEUI.toLowerCase();
+            const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+            
+            console.log(`📍 Mode1: ${device.deviceId}の監視開始`, { devEUI: device.devEUI, normalized: normalizedDeviceId });
+            
             onValue(trackerRef, (snapshot) => {
               const data = snapshot.val();
-              if (data && data.ble && roomData) {
+              if (data && data.beacons && roomData) {
+                console.log(`📡 ${device.deviceId}のRTDB更新:`, { timestamp: data.beaconsUpdatedAt, beaconsCount: data.beacons.length });
+                
                 // タイムスタンプを保存
-                if (data.ts) {
+                if (data.beaconsUpdatedAt) {
                   setDeviceTimestamps(prev => {
                     const newMap = new Map(prev);
-                    newMap.set(device.devEUI, data.ts);
+                    newMap.set(device.devEUI, data.beaconsUpdatedAt);
                     return newMap;
                   });
                 }
 
-                // 各ビーコンからRSSI値を取得して平均化
+                // 各ビーコンからRSSI値を取得
                 const rssiMap: { [beaconId: string]: number } = {};
                 
-                Object.entries(data.ble).forEach(([beaconId, beaconData]: [string, any]) => {
-                  if (beaconData.rssi_data && Array.isArray(beaconData.rssi_data)) {
-                    // rssi_data配列から平均RSSI値を計算
-                    const rssiValues = beaconData.rssi_data.map((item: any) => item.rssi);
-                    const averageRssi = rssiValues.reduce((sum: number, rssi: number) => sum + rssi, 0) / rssiValues.length;
-                    rssiMap[beaconId] = averageRssi;
+                data.beacons.forEach((beacon: any) => {
+                  if (beacon.mac && beacon.rssi) {
+                    // MACアドレスを正規化（コロン区切りを大文字に統一）
+                    const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, '');
+                    rssiMap[normalizedMac] = beacon.rssi;
                   }
                 });
+                
+                console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
 
                 // ハイブリッド位置推定（Fingerprinting + 三辺測量）
                 const position = estimatePositionHybrid(
