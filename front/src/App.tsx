@@ -66,7 +66,7 @@ function App() {
         <header className="header">
           <div className="header-content">
             <Link to="/" className="logo">
-              見守りシステム（mimoca）
+              見守りシステム mimoca
             </Link>
             <NavBar onLogout={handleLogout} />
           </div>

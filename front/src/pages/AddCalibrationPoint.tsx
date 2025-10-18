@@ -19,6 +19,11 @@ export default function AddCalibrationPoint() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loading, setLoading] = useState(true);
 
+  // 測定キャンセル用
+  const trackerRefRef = useRef<any>(null);
+  const listenerRef = useRef<any>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     loadRoom();
     loadDevices();
@@ -215,6 +220,7 @@ export default function AddCalibrationPoint() {
     // デバイスIDを小文字に正規化（RTDBと一致させる）
     const normalizedDeviceId = selectedDevice.toLowerCase();
     const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+    trackerRefRef.current = trackerRef;
     
     console.log('📍 測定開始:', { selectedDevice, normalizedDeviceId, path: `devices/${normalizedDeviceId}` });
     
@@ -261,6 +267,12 @@ export default function AddCalibrationPoint() {
           
           setIsScanning(false);
           off(trackerRef);
+          trackerRefRef.current = null;
+          listenerRef.current = null;
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
         }
       } else {
         console.log('⚠️ beaconsデータが見つかりません', data);
@@ -270,15 +282,39 @@ export default function AddCalibrationPoint() {
       setIsScanning(false);
     });
 
+    listenerRef.current = listener;
+
     // 65秒後にタイムアウト
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       if (isScanning) {
         console.log('⏱️ 測定がタイムアウト');
         setIsScanning(false);
         off(trackerRef);
+        trackerRefRef.current = null;
+        listenerRef.current = null;
         alert('測定がタイムアウトしました。トラッカーがデータを送信するまで最大1分かかります。もう一度試してください。');
       }
     }, 65000);
+
+    timeoutRef.current = timeout;
+  };
+
+  const cancelMeasurement = () => {
+    console.log('❌ 測定をキャンセル');
+    setIsScanning(false);
+    
+    if (trackerRefRef.current) {
+      off(trackerRefRef.current);
+      trackerRefRef.current = null;
+    }
+    
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    
+    listenerRef.current = null;
+    setCurrentMeasurement(null);
   };
 
   const saveCalibrationPoint = async () => {
@@ -407,13 +443,23 @@ export default function AddCalibrationPoint() {
         </div>
 
         <div style={{ marginBottom: '16px' }}>
-          <button
-            className="btn btn-primary"
-            onClick={startMeasurement}
-            disabled={isScanning || !selectedDevice || !selectedPosition || !pointLabel.trim()}
-          >
-            {isScanning ? '測定中...' : 'ここで測定'}
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              className="btn btn-primary"
+              onClick={startMeasurement}
+              disabled={isScanning || !selectedDevice || !selectedPosition || !pointLabel.trim()}
+            >
+              {isScanning ? '測定中...' : 'ここで測定'}
+            </button>
+            {isScanning && (
+              <button
+                className="btn btn-outline"
+                onClick={cancelMeasurement}
+              >
+                測定キャンセル
+              </button>
+            )}
+          </div>
         </div>
 
         {currentMeasurement && (

@@ -67,6 +67,11 @@ export default function Calibration() {
   const [roomWidth, setRoomWidth] = useState<string>('');
   const [roomHeight, setRoomHeight] = useState<string>('');
 
+  // 測定キャンセル用
+  const trackerRefRef = useRef<any>(null);
+  const listenerRef = useRef<any>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
 
   useEffect(() => {
     loadDevices();
@@ -443,6 +448,7 @@ export default function Calibration() {
     // デバイスIDを小文字に正規化（RTDBと一致させる）
     const normalizedDeviceId = selectedDevice.toLowerCase();
     const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+    trackerRefRef.current = trackerRef;
     
     console.log('📍 測定開始:', { selectedDevice, normalizedDeviceId, path: `devices/${normalizedDeviceId}` });
     
@@ -489,6 +495,12 @@ export default function Calibration() {
           
           setIsScanning(false);
           off(trackerRef);
+          trackerRefRef.current = null;
+          listenerRef.current = null;
+          if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+          }
         }
       } else {
         console.log('⚠️ beaconsデータが見つかりません', data);
@@ -498,15 +510,39 @@ export default function Calibration() {
       setIsScanning(false);
     });
 
+    listenerRef.current = listener;
+
     // 60秒後にタイムアウト（トラッカーは1分間隔で送信するため）
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       if (isScanning) {
         console.log('⏱️ 測定がタイムアウト');
         setIsScanning(false);
         off(trackerRef);
+        trackerRefRef.current = null;
+        listenerRef.current = null;
         alert('測定がタイムアウトしました。トラッカーがデータを送信するまで最大1分かかります。もう一度試してください。');
       }
     }, 65000);
+
+    timeoutRef.current = timeout;
+  };
+
+  const cancelMeasurement = () => {
+    console.log('❌ 測定をキャンセル');
+    setIsScanning(false);
+    
+    if (trackerRefRef.current) {
+      off(trackerRefRef.current);
+      trackerRefRef.current = null;
+    }
+    
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    
+    listenerRef.current = null;
+    setCurrentMeasurement(null);
   };
 
   const saveMeasurement = () => {
@@ -648,23 +684,29 @@ export default function Calibration() {
             </div>
             <div className="form-group">
               <label className="form-label">使用するビーコン（3台選択） *</label>
-              {beacons.map(beacon => (
-                <label key={beacon.firestoreId} style={{ display: 'block', marginBottom: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedBeacons.includes(beacon.firestoreId)}
-                    onChange={(e) => {
-                      if (e.target.checked && selectedBeacons.length < 3) {
-                        setSelectedBeacons([...selectedBeacons, beacon.firestoreId]);
-                      } else if (!e.target.checked) {
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px', alignItems: 'center' }}>
+                {beacons.map(beacon => (
+                  <button
+                    key={beacon.firestoreId}
+                    className={selectedBeacons.includes(beacon.firestoreId) ? 'btn btn-primary' : 'btn btn-outline'}
+                    onClick={() => {
+                      if (selectedBeacons.includes(beacon.firestoreId)) {
                         setSelectedBeacons(selectedBeacons.filter(id => id !== beacon.firestoreId));
+                      } else if (selectedBeacons.length < 3) {
+                        setSelectedBeacons([...selectedBeacons, beacon.firestoreId]);
                       }
                     }}
                     disabled={!selectedBeacons.includes(beacon.firestoreId) && selectedBeacons.length >= 3}
-                  />
-                  {' '}{beacon.beaconId || beacon.name || beacon.firestoreId}
-                </label>
-              ))}
+                    style={{ 
+                      cursor: 'pointer',
+                      minWidth: '140px',
+                      flex: '0 0 auto'
+                    }}
+                  >
+                    {beacon.beaconId || beacon.name || beacon.firestoreId}
+                  </button>
+                ))}
+              </div>
             </div>
             <button
               className="btn btn-primary"
@@ -702,13 +744,23 @@ export default function Calibration() {
             </div>
 
             <div style={{ marginBottom: '16px' }}>
-              <button
-                className="btn btn-primary"
-                onClick={startMeasurement}
-                disabled={isScanning || !selectedDevice}
-              >
-                {isScanning ? '測定中...' : 'ここで測定'}
-              </button>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={startMeasurement}
+                  disabled={isScanning || !selectedDevice}
+                >
+                  {isScanning ? '測定中...' : 'ここで測定'}
+                </button>
+                {isScanning && (
+                  <button
+                    className="btn btn-outline"
+                    onClick={cancelMeasurement}
+                  >
+                    測定キャンセル
+                  </button>
+                )}
+              </div>
             </div>
 
             {currentMeasurement && (
