@@ -99,6 +99,10 @@ export default function CalibrationRoomList() {
     );
   }
 
+  const handleEditFurniture = (roomId: string) => {
+    navigate(`/calibration/furniture/${roomId}`);
+  };
+
   // ルームが0の場合はリダイレクトされるのでここには来ない
   return (
     <div className="container">
@@ -124,13 +128,14 @@ export default function CalibrationRoomList() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
-                <th style={{ padding: '12px' }}>ルーム名</th>
-                <th style={{ padding: '12px' }}>ビーコン数</th>
-                <th style={{ padding: '12px' }}>キャリブレーション点</th>
-                <th style={{ padding: '12px' }}>サイズ</th>
-                <th style={{ padding: '12px' }}>作成日</th>
-                <th style={{ padding: '12px' }}>状態</th>
-                <th style={{ padding: '12px' }}>操作</th>
+                <th style={{ padding: '10px' }}>ルーム名</th>
+                <th style={{ padding: '10px' }}>ビーコン数</th>
+                <th style={{ padding: '10px' }}>キャリブレーション点</th>
+                <th style={{ padding: '10px' }}>家具数</th>
+                <th style={{ padding: '10px' }}>サイズ</th>
+                <th style={{ padding: '10px' }}>作成日</th>
+                <th style={{ padding: '10px' }}>状態</th>
+                <th style={{ padding: '10px' }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -141,30 +146,31 @@ export default function CalibrationRoomList() {
                     borderBottom: '1px solid #e1e8ed',
                     backgroundColor: isActive ? '#E3F2FD' : 'transparent'
                   }}>
-                    <td style={{ padding: '12px' }}>
+                    <td style={{ padding: '10px' }}>
                       <strong>{room.name}</strong>
                       {isActive && (
                         <span style={{
                           marginLeft: '8px',
-                          padding: '2px 8px',
+                          padding: '2px 6px',
                           borderRadius: '8px',
-                          fontSize: '11px',
+                          fontSize: '10px',
                           backgroundColor: '#4A90E2',
                           color: 'white'
                         }}>
-                          アクティブ
+                          使用中
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '12px' }}>{room.beacons.length}台</td>
-                    <td style={{ padding: '12px' }}>{room.calibrationPoints.length}ヶ所</td>
-                    <td style={{ padding: '12px' }}>
+                    <td style={{ padding: '10px' }}>{room.beacons.length}台</td>
+                    <td style={{ padding: '10px' }}>{room.calibrationPoints.length}ヶ所</td>
+                    <td style={{ padding: '10px' }}>{room.furniture?.length || 0}個</td>
+                    <td style={{ padding: '10px' }}>
                       {room.outline ? `${room.outline.width}m × ${room.outline.height}m` : '未設定'}
                     </td>
-                    <td style={{ padding: '12px', fontSize: '14px', color: '#7f8c8d' }}>
+                    <td style={{ padding: '10px', fontSize: '14px', color: '#7f8c8d' }}>
                       {new Date(room.createdAt).toLocaleDateString('ja-JP')}
                     </td>
-                    <td style={{ padding: '12px' }}>
+                    <td style={{ padding: '7px' }}>
                       {isActive ? (
                         <span style={{
                           padding: '4px 12px',
@@ -187,11 +193,11 @@ export default function CalibrationRoomList() {
                         </span>
                       )}
                     </td>
-                    <td style={{ padding: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <td style={{ padding: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {!isActive && (
                         <button
                           className="btn btn-primary"
-                          style={{ padding: '6px 12px', fontSize: '14px' }}
+                          style={{ padding: '6px 9px', fontSize: '10px' }}
                           onClick={() => setActiveRoom(room.id)}
                         >
                           使用する
@@ -199,14 +205,21 @@ export default function CalibrationRoomList() {
                       )}
                       <button
                         className="btn btn-outline"
-                        style={{ padding: '6px 12px', fontSize: '14px' }}
+                        style={{ padding: '6px 9px', fontSize: '10px' }}
                         onClick={() => navigate(`/add-calibration-point/${room.id}`)}
                       >
                         追加測定
                       </button>
                       <button
+                        className="btn btn-outline"
+                        style={{ padding: '6px 9px', fontSize: '10px', backgroundColor: '#FFF3CD', borderColor: '#FFEAA7', color: '#856404' }}
+                        onClick={() => handleEditFurniture(room.id)}
+                      >
+                        家具編集
+                      </button>
+                      <button
                         className="btn btn-danger"
-                        style={{ padding: '6px 12px', fontSize: '14px' }}
+                        style={{ padding: '6px 9px', fontSize: '10px' }}
                         onClick={() => deleteRoom(room.id)}
                       >
                         削除
@@ -226,6 +239,7 @@ export default function CalibrationRoomList() {
           <li><strong>新規ルーム作成:</strong> 新しい部屋のキャリブレーションを行う場合は「新規ルーム作成」ボタンをクリック</li>
           <li><strong>使用する:</strong> このルームを機能1（室内測位）で使用する場合に選択</li>
           <li><strong>追加測定:</strong> 既存のルームにキャリブレーション点を追加して精度を向上</li>
+          <li><strong>家具編集:</strong> ルーム内の家具やオブジェクトの配置を編集・更新</li>
           <li><strong>削除:</strong> 不要になったルームを削除（復元できないのでご注意ください）</li>
         </ul>
       </div>

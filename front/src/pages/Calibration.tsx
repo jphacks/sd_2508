@@ -5,6 +5,7 @@ import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { Device, Beacon, CalibrationPoint, RoomProfile, FurnitureItem } from '../types';
 
+
 const CALIBRATION_STEPS = [
   { id: 'corner1', label: '左上隅', position: { x: 0, y: 0 } },
   { id: 'corner2', label: '右上隅', position: { x: 10, y: 0 } },
@@ -40,7 +41,7 @@ type FurnitureType = keyof typeof FURNITURE_TYPES;
 
 
 export default function Calibration() {
-  const { mode } = useParams<{ mode: string }>();
+  const { mode, roomId } = useParams<{ mode: string; roomId?: string }>();
   const navigate = useNavigate();
   
   const [step, setStep] = useState(0);
@@ -63,12 +64,21 @@ export default function Calibration() {
   const [resizeHandle, setResizeHandle] = useState<'se' | 'sw' | 'ne' | 'nw' | null>(null);
   const [originalSize, setOriginalSize] = useState<{width: number, height: number} | null>(null);
 
+  const [isEditMode, setIsEditMode] = useState(false); // 編集モードかどうか
+  const [originalRoomData, setOriginalRoomData] = useState<RoomProfile | null>(null);
+
 
   useEffect(() => {
     loadDevices();
     loadBeacons();
+
+    // 編集モードの場合、既存のルームデータを読み込み
+    if (mode === 'furniture' && roomId) {
+      loadRoomData(roomId);
+    }
+
     drawMap();//(追加)マップ描写関数
-  }, [furniture, selectedFurniture]); // furnitureやselectedFurnitureが変わるたびに再描画
+  }, [furniture, selectedFurniture, mode, roomId]); // furnitureやselectedFurnitureが変わるたびに再描画
 
   const loadDevices = async () => {
     const snapshot = await getDocs(collection(db, 'devices'));
@@ -77,6 +87,29 @@ export default function Calibration() {
       ...doc.data()
     } as Device & { id: string }));
     setDevices(data);
+  };
+
+  const loadRoomData = async (roomId: string) => {
+    try {
+      const roomDoc = await getDoc(doc(db, 'rooms', roomId));
+      if (roomDoc.exists()) {
+        const roomData = roomDoc.data() as RoomProfile;
+        setOriginalRoomData(roomData);
+        setRoomName(roomData.name);
+        setSelectedBeacons(roomData.beacons || []);
+        setFurniture(roomData.furniture || []);
+        setCalibrationPoints(roomData.calibrationPoints || []);
+        setIsEditMode(true);
+        setShowFurniture(true);
+      } else {
+        alert('ルームが見つかりません');
+        navigate('/rooms');
+      }
+    } catch (error) {
+      console.error('ルーム読み込みエラー:', error);
+      alert('ルームの読み込みに失敗しました');
+      navigate('/rooms');
+    }
   };
 
   const loadBeacons = async () => {
@@ -185,7 +218,7 @@ export default function Calibration() {
   ctx.textAlign = 'left';
 };
 
-  const addFurniture = (type: FurnitureType) => { // FurnitureItem['type'] から FurnitureType に変更
+  const addFurniture = (type: FurnitureType) => {
     const furnitureType = FURNITURE_TYPES[type];
     const newItem: FurnitureItem = {
       id: `furniture-${Date.now()}`,
@@ -194,7 +227,13 @@ export default function Calibration() {
       width: furnitureType.width,
       height: furnitureType.height
     };
-    setFurniture([...furniture, newItem]);
+    
+    console.log('Adding furniture:', newItem); // デバッグ用
+    setFurniture(prev => {
+      const updated = [...prev, newItem];
+      console.log('Updated furniture list:', updated); // デバッグ用
+      return updated;
+    });
     setSelectedFurniture(newItem.id);
   };
 
@@ -224,13 +263,20 @@ export default function Calibration() {
       calibrationPoints: calibrationPoints,
       outline: { width: TEST_ROOM.width, height: TEST_ROOM.height },
       furniture: furniture,
-      createdAt: new Date().toISOString(),
+      createdAt: originalRoomData?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     try {
-      await addDoc(collection(db, 'rooms'), roomProfile);
-      alert(`「${roomName}」の家具配置が保存されました！`);
+      if (isEditMode && roomId) {
+        // 編集モード：既存のドキュメントを更新
+        await updateDoc(doc(db, 'rooms', roomId), roomProfile);
+        alert(`「${roomName}」の家具配置が更新されました！`);
+      } else {
+        // 新規作成モード
+        await addDoc(collection(db, 'rooms'), roomProfile);
+        alert(`「${roomName}」の家具配置が保存されました！`);
+      }
       navigate('/mode1');
     } catch (error) {
       console.error('保存エラー:', error);
@@ -391,8 +437,6 @@ export default function Calibration() {
     setResizeHandle(null);
     setOriginalSize(null);
   };
-
-
 
 
   const startMeasurement = () => {
@@ -767,26 +811,20 @@ export default function Calibration() {
     return (
       <div className="container">
         <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-          家具とオブジェクトの配置
+          {isEditMode ? '家具配置の編集' : '家具とオブジェクトの配置'}
         </h1>
 
         <div style={{ display: 'flex', gap: '24px' }}>
           {/* 左側: コントロールパネル */}
           <div style={{ width: '300px' }}>
-            <div className="card" style={{ marginBottom: '16px' }}>
-              <h3 style={{ marginBottom: '16px' }}>家具を追加</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {Object.entries(FURNITURE_TYPES).map(([type, info]) => (
-                  <button
-                    key={type}
-                    className="btn btn-outline"
-                    onClick={() => addFurniture(type as FurnitureType)} // 型アサーションを修正
-                  >
-                      {info.label}を追加
-                    </button>
-                ))}
+            {isEditMode && (
+              <div className="card" style={{ marginBottom: '16px', backgroundColor: '#FFF3CD', border: '1px solid #FFEAA7' }}>
+                <h3 style={{ marginBottom: '12px', color: '#856404' }}>編集モード</h3>
+                <p style={{ fontSize: '14px', color: '#856404', margin: 0 }}>
+                  「{roomName}」の家具配置を編集しています
+                </p>
               </div>
-            </div>
+            )}
 
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>配置済みオブジェクト</h3>
@@ -841,9 +879,12 @@ export default function Calibration() {
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
               <button className="btn btn-primary" onClick={saveCalibration}>
-                保存
+                {isEditMode ? '更新' : '保存'}
               </button>
-              <button className="btn btn-outline" onClick={() => navigate('/mode1')}>
+              <button 
+                className="btn btn-outline" 
+                onClick={() => navigate(isEditMode ? '/rooms' : '/mode1')}
+              >
                 キャンセル
               </button>
             </div>
