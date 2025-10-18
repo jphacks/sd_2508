@@ -85,14 +85,14 @@ export function estimatePositionByFingerprinting(
 }
 
 /**
- * 三辺測量による位置推定
+ * 三辺測量による位置推定（非線形最小二乗法）
  * 3つのビーコンからの距離を使って位置を推定
  */
 export function estimatePositionByTrilateration(
   beaconPositions: Array<{ x: number; y: number; mac: string }>,
   rssiValues: { [beaconMac: string]: number },
   referenceRssi: number = -59
-): { x: number; y: number } | null {
+): { x: number; y: number; confidence: number } | null {
   // 3つ以上のビーコンが必要
   const validBeacons = beaconPositions.filter(b => rssiValues[b.mac] !== undefined);
   
@@ -106,17 +106,106 @@ export function estimatePositionByTrilateration(
     distance: rssiToDistance(rssiValues[beacon.mac], referenceRssi)
   }));
 
-  // 最初の3つのビーコンを使用
+  // 最初の3つのビーコンを使用して初期位置を推定（重心）
   const [b1, b2, b3] = distances.slice(0, 3);
+  let x = (b1.x + b2.x + b3.x) / 3;
+  let y = (b1.y + b2.y + b3.y) / 3;
 
-  // TODO: 実際の三辺測量のアルゴリズムを実装
-  // 現在は簡易的な重み付け平均を使用
-  const totalWeight = 1/b1.distance + 1/b2.distance + 1/b3.distance;
+  // 反復計算による位置の最適化（Gauss-Newton法の簡易版）
+  const maxIterations = 10;
+  const convergenceThreshold = 0.01; // 1cm
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    let sumDx = 0;
+    let sumDy = 0;
+    let sumWeight = 0;
+
+    for (const beacon of distances) {
+      // 現在の推定位置からビーコンまでの距離
+      const dx = x - beacon.x;
+      const dy = y - beacon.y;
+      const estimatedDistance = Math.sqrt(dx * dx + dy * dy);
+
+      if (estimatedDistance === 0) continue;
+
+      // 推定距離と実測距離の差
+      const error = estimatedDistance - beacon.distance;
+      
+      // 重み（距離が近いほど信頼性が高い）
+      const weight = 1 / (beacon.distance + 1);
+
+      // 勾配を計算
+      const gradX = (dx / estimatedDistance) * error * weight;
+      const gradY = (dy / estimatedDistance) * error * weight;
+
+      sumDx += gradX;
+      sumDy += gradY;
+      sumWeight += weight;
+    }
+
+    if (sumWeight === 0) break;
+
+    // 位置を更新（学習率0.5）
+    const learningRate = 0.5;
+    const deltaX = -(sumDx / sumWeight) * learningRate;
+    const deltaY = -(sumDy / sumWeight) * learningRate;
+
+    x += deltaX;
+    y += deltaY;
+
+    // 収束判定
+    const movement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    if (movement < convergenceThreshold) {
+      break;
+    }
+  }
+
+  // 信頼度を計算
+  const confidence = calculateTrilaterationConfidence(
+    { x, y },
+    rssiValues,
+    distances
+  );
+
+  return { x, y, confidence };
+}
+
+/**
+ * 三辺測量の信頼度を計算
+ */
+function calculateTrilaterationConfidence(
+  position: { x: number; y: number },
+  rssiValues: { [beaconMac: string]: number },
+  beaconDistances: Array<{ x: number; y: number; distance: number; mac: string }>
+): number {
+  // 平均RSSI値（信号強度）
+  const rssiList = Object.values(rssiValues);
+  const avgRssi = rssiList.reduce((a, b) => a + b, 0) / rssiList.length;
   
-  const x = (b1.x / b1.distance + b2.x / b2.distance + b3.x / b3.distance) / totalWeight;
-  const y = (b1.y / b1.distance + b2.y / b2.distance + b3.y / b3.distance) / totalWeight;
-
-  return { x, y };
+  // RSSI値が強いほど信頼度が高い（-40dBm～-100dBm）
+  const rssiConfidence = Math.max(0, Math.min(1, (-40 - avgRssi) / 60));
+  
+  // ビーコン数が多いほど信頼度が高い
+  const beaconCountConfidence = Math.min(1, rssiList.length / 3);
+  
+  // 推定位置と実測距離の一貫性をチェック
+  let consistencyError = 0;
+  for (const beacon of beaconDistances) {
+    const dx = position.x - beacon.x;
+    const dy = position.y - beacon.y;
+    const estimatedDistance = Math.sqrt(dx * dx + dy * dy);
+    const error = Math.abs(estimatedDistance - beacon.distance);
+    consistencyError += error;
+  }
+  const avgError = consistencyError / beaconDistances.length;
+  const consistencyConfidence = Math.max(0, 1 - avgError / 5); // 5m以上のエラーで0
+  
+  // 総合的な信頼度（重み付け平均）
+  return (
+    rssiConfidence * 0.3 +
+    beaconCountConfidence * 0.3 +
+    consistencyConfidence * 0.4
+  );
 }
 
 /**
@@ -181,4 +270,93 @@ export function smoothRSSI(values: number[], windowSize: number = 3): number {
   
   const recentValues = values.slice(-windowSize);
   return recentValues.reduce((a, b) => a + b, 0) / windowSize;
+}
+
+/**
+ * ハイブリッド位置推定（Fingerprinting + 三辺測量の自動重み付け併用）
+ * 両手法の信頼度に基づいて自動的に重み付けを調整
+ */
+export function estimatePositionHybrid(
+  currentRssi: { [beaconId: string]: number },
+  calibrationPoints: CalibrationPoint[],
+  beaconPositions?: Array<{ x: number; y: number; mac: string; beaconId: string }>,
+  referenceRssi: number = -59
+): { x: number; y: number; confidence: number; method: string } | null {
+  
+  // Fingerprinting法で推定
+  const fingerprintResult = estimatePositionByFingerprinting(
+    currentRssi, 
+    calibrationPoints
+  );
+  
+  // 三辺測量法で推定（ビーコン位置情報がある場合のみ）
+  let trilaterationResult: { x: number; y: number; confidence: number } | null = null;
+  if (beaconPositions && beaconPositions.length >= 3) {
+    trilaterationResult = estimatePositionByTrilateration(
+      beaconPositions,
+      currentRssi,
+      referenceRssi
+    );
+  }
+  
+  // 両方の結果がある場合は重み付け平均
+  if (fingerprintResult && trilaterationResult) {
+    const fpConfidence = fingerprintResult.confidence;
+    const triConfidence = trilaterationResult.confidence;
+    
+    // キャリブレーション点の数に応じて基本重みを調整
+    const calibrationBonus = Math.min(0.2, calibrationPoints.length / 50);
+    const adjustedFpConfidence = fpConfidence + calibrationBonus;
+    
+    // 両者の結果の一貫性をチェック
+    const distance = Math.sqrt(
+      Math.pow(fingerprintResult.x - trilaterationResult.x, 2) + 
+      Math.pow(fingerprintResult.y - trilaterationResult.y, 2)
+    );
+    
+    // 一貫性が高い場合は両方の信頼度を上げる
+    const consistencyBonus = distance < 1.0 ? 0.15 : (distance < 2.0 ? 0.05 : 0);
+    const finalFpConfidence = adjustedFpConfidence + consistencyBonus;
+    const finalTriConfidence = triConfidence + consistencyBonus;
+    
+    const totalConfidence = finalFpConfidence + finalTriConfidence;
+    
+    // 重み付け平均で最終位置を計算
+    const x = (fingerprintResult.x * finalFpConfidence + 
+               trilaterationResult.x * finalTriConfidence) / totalConfidence;
+    const y = (fingerprintResult.y * finalFpConfidence + 
+               trilaterationResult.y * finalTriConfidence) / totalConfidence;
+    
+    // 最終的な信頼度
+    const finalConfidence = Math.min(1, (finalFpConfidence + finalTriConfidence) / 2);
+    
+    // 重みの割合を計算（デバッグ用）
+    const fpPercent = Math.round((finalFpConfidence / totalConfidence) * 100);
+    const triPercent = Math.round((finalTriConfidence / totalConfidence) * 100);
+    
+    return {
+      x,
+      y,
+      confidence: finalConfidence,
+      method: `Hybrid (FP:${fpPercent}% TRI:${triPercent}%)`
+    };
+  }
+  
+  // Fingerprintingのみ使用可能
+  if (fingerprintResult) {
+    return { 
+      ...fingerprintResult, 
+      method: 'Fingerprinting Only' 
+    };
+  }
+  
+  // 三辺測量のみ使用可能
+  if (trilaterationResult) {
+    return { 
+      ...trilaterationResult, 
+      method: 'Trilateration Only' 
+    };
+  }
+  
+  return null;
 }

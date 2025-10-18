@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { ref, onValue } from 'firebase/database';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { rtdb, db } from '../firebase';
-import { Device, BLEScan, RoomProfile, Alert } from '../types';
-import { estimatePositionByFingerprinting } from '../utils/positioning';
+import { Device, BLEScan, RoomProfile, Alert, Beacon } from '../types';
+import { estimatePositionHybrid } from '../utils/positioning';
 
 export default function Mode1Indoor() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -59,6 +59,29 @@ export default function Mode1Indoor() {
           const roomData = { roomId: roomDoc.id, ...roomDoc.data() } as RoomProfile;
           setRoomProfile(roomData);
 
+          // ビーコン情報を取得（三辺測量用）
+          const beaconsSnapshot = await getDocs(collection(db, 'beacons'));
+          const beaconsData = beaconsSnapshot.docs.map(doc => ({
+            firestoreId: doc.id,
+            ...doc.data()
+          } as Beacon & { firestoreId: string }));
+
+          // ルームで使用するビーコンの位置情報を構築
+          const beaconPositions = roomData.beacons
+            .map(beaconId => {
+              const beacon = beaconsData.find(b => b.firestoreId === beaconId);
+              if (beacon && beacon.place) {
+                return {
+                  x: beacon.place.x,
+                  y: beacon.place.y,
+                  mac: beacon.mac,
+                  beaconId: beaconId
+                };
+              }
+              return null;
+            })
+            .filter(b => b !== null) as Array<{ x: number; y: number; mac: string; beaconId: string }>;
+
           // 各デバイスのBLEスキャンデータを監視
           devicesData.forEach(device => {
             const trackerRef = ref(rtdb, `CARDS/${device.devEUI}`);
@@ -77,10 +100,11 @@ export default function Mode1Indoor() {
                   }
                 });
 
-                // 位置を推定
-                const position = estimatePositionByFingerprinting(
+                // ハイブリッド位置推定（Fingerprinting + 三辺測量）
+                const position = estimatePositionHybrid(
                   rssiMap,
-                  roomData.calibrationPoints
+                  roomData.calibrationPoints,
+                  beaconPositions.length >= 3 ? beaconPositions : undefined
                 );
 
                 if (position) {
@@ -92,6 +116,9 @@ export default function Mode1Indoor() {
 
                   // 部屋の外に出たかチェック
                   checkRoomExit(device, position, roomData);
+                  
+                  // デバッグ用にメソッド情報を表示（オプション）
+                  console.log(`${device.deviceId}: ${position.method} (信頼度: ${(position.confidence * 100).toFixed(1)}%)`);
                 }
               }
             });
