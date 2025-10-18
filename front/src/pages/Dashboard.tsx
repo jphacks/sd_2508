@@ -66,7 +66,7 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode1' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode1')}
         >
-          <h3>機能1</h3>
+          <h3 style={{ fontSize: '24px' }}>機能1</h3>
           <p style={{ fontSize: '14px', marginTop: '8px' }}>室内位置追跡</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
             BLE×3で部屋内の位置を把握
@@ -77,7 +77,7 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode2' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode2')}
         >
-          <h3>機能2</h3>
+          <h3 style={{ fontSize: '24px' }}>機能2</h3>
           <p style={{ fontSize: '14px', marginTop: '8px' }}>バス置き去り検知</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
             BLE×1で置き去りを検知
@@ -88,10 +88,10 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode3' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode3')}
         >
-          <h3>機能3</h3>
+          <h3 style={{ fontSize: '24px' }}>機能3</h3>
           <p style={{ fontSize: '14px', marginTop: '8px' }}>屋外GPS追跡</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
-            GPSで親子の距離を監視
+            GPSで保護者からの距離を確認
           </p>
         </div>
       </div>
@@ -107,32 +107,14 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
         </div>
 
         <div className="card">
-          <h2 style={{ marginBottom: '16px' }}>クイックアクション</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <button 
-              className="btn btn-primary"
-              onClick={() => navigate('/management')}
-            >
-              トラッカー・ビーコン管理
-            </button>
-            <button 
-              className="btn btn-outline"
-              onClick={() => navigate(`/calibration/${currentMode}`)}
-            >
-              キャリブレーション
-            </button>
-          </div>
+          <h2 style={{ marginBottom: '16px' }}>使い方</h2>
+          <ol style={{ paddingLeft: '20px', lineHeight: '1.8', fontSize: '14px' }}>
+            <li>上部のモード選択から使用したい機能を選択してください</li>
+            <li>初回使用時は自動的にキャリブレーション画面に遷移します</li>
+            <li>管理画面でデバイスとビーコンを登録できます</li>
+            <li>各モードで警告が発生すると、画面に通知が表示されます</li>
+          </ol>
         </div>
-      </div>
-
-      <div className="card" style={{ marginTop: '32px' }}>
-        <h2 style={{ marginBottom: '16px' }}>使い方</h2>
-        <ol style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
-          <li>上部のモード選択から使用したい機能を選択してください</li>
-          <li>初回使用時は自動的にキャリブレーション画面に遷移します</li>
-          <li>管理画面でデバイスとビーコンを登録できます</li>
-          <li>各モードで警告が発生すると、画面に通知が表示されます</li>
-        </ol>
       </div>
     </div>
   );

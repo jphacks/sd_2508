@@ -13,6 +13,8 @@ export default function Management() {
   const [showAddBeacon, setShowAddBeacon] = useState(false);
   const [editingBeaconId, setEditingBeaconId] = useState<string | null>(null);
   const [editRssiAt1m, setEditRssiAt1m] = useState<string>('');
+  const [editingDeviceId, setEditingDeviceId] = useState<string | null>(null);
+  const [editUserName, setEditUserName] = useState<string>('');
 
   useEffect(() => {
     loadDevices();
@@ -135,6 +137,37 @@ export default function Management() {
     setEditRssiAt1m('');
   };
 
+  const startEditDevice = (device: Device & { id: string }) => {
+    setEditingDeviceId(device.id);
+    setEditUserName(device.userName || '');
+  };
+
+  const cancelEditDevice = () => {
+    setEditingDeviceId(null);
+    setEditUserName('');
+  };
+
+  const handleUpdateDeviceUserName = async () => {
+    if (!editingDeviceId) return;
+
+    const trimmedValue = editUserName.trim();
+    if (trimmedValue === '') {
+      alert('所持者名を入力してください');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'devices', editingDeviceId), {
+        userName: trimmedValue
+      });
+      cancelEditDevice();
+      loadDevices();
+    } catch (error) {
+      console.error('所持者名更新エラー:', error);
+      alert('所持者名の更新に失敗しました');
+    }
+  };
+
   const handleUpdateBeaconReferenceRssi = async () => {
     if (!editingBeaconId) return;
 
@@ -211,36 +244,80 @@ export default function Management() {
                     </tr>
                   </thead>
                   <tbody>
-                    {devices.map((device, index) => (
-                      <tr key={(device as any).id || index} style={{ borderBottom: '1px solid #e1e8ed' }}>
-                        <td style={{ padding: '12px' }}><strong>{device.deviceId || '未設定'}</strong></td>
-                        <td style={{ padding: '12px' }}>{device.userName || '未設定'}</td>
-                        <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
-                          {device.devEUI}
-                        </td>
-                        <td style={{ padding: '12px' }}>{device.model}</td>
-                        <td style={{ padding: '12px' }}>
-                          <span style={{
-                            padding: '4px 12px',
-                            borderRadius: '12px',
-                            fontSize: '12px',
-                            backgroundColor: device.status === 'active' ? '#D4EDDA' : '#F8D7DA',
-                            color: device.status === 'active' ? '#155724' : '#721C24'
-                          }}>
-                            {device.status === 'active' ? 'アクティブ' : '非アクティブ'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px' }}>
-                          <button
-                            className="btn btn-danger"
-                            style={{ padding: '6px 12px', fontSize: '14px' }}
-                            onClick={() => handleDeleteDevice((device as any).id)}
-                          >
-                            削除
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {devices.map((device, index) => {
+                      const deviceId = (device as any).id;
+                      const isEditing = editingDeviceId === deviceId;
+                      return (
+                        <tr key={deviceId || index} style={{ borderBottom: '1px solid #e1e8ed' }}>
+                          <td style={{ padding: '12px' }}><strong>{device.deviceId || '未設定'}</strong></td>
+                          <td style={{ padding: '12px' }}>
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={editUserName}
+                                onChange={e => setEditUserName(e.target.value)}
+                                className="form-input"
+                                style={{ width: '140px' }}
+                              />
+                            ) : (
+                              device.userName || '未設定'
+                            )}
+                          </td>
+                          <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
+                            {device.devEUI}
+                          </td>
+                          <td style={{ padding: '12px' }}>{device.model}</td>
+                          <td style={{ padding: '12px' }}>
+                            <span style={{
+                              padding: '4px 12px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              backgroundColor: device.status === 'active' ? '#D4EDDA' : '#F8D7DA',
+                              color: device.status === 'active' ? '#155724' : '#721C24'
+                            }}>
+                              {device.status === 'active' ? 'アクティブ' : '非アクティブ'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="btn btn-primary"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={handleUpdateDeviceUserName}
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={cancelEditDevice}
+                                >
+                                  キャンセル
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={() => startEditDevice(device as Device & { id: string })}
+                                >
+                                  編集
+                                </button>
+                                <button
+                                  className="btn btn-danger"
+                                  style={{ padding: '6px 12px', fontSize: '14px' }}
+                                  onClick={() => handleDeleteDevice(deviceId)}
+                                >
+                                  削除
+                                </button>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
