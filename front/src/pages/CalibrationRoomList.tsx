@@ -205,10 +205,10 @@ export default function CalibrationRoomList() {
                       )}
                       <button
                         className="btn btn-outline"
-                        style={{ padding: '6px 9px', fontSize: '10px' }}
-                        onClick={() => navigate(`/add-calibration-point/${room.id}`)}
+                        style={{ padding: '6px 12px', fontSize: '14px' }}
+                        onClick={() => navigate(`/edit-room/${room.id}`)}
                       >
-                        追加測定
+                        編集
                       </button>
                       <button
                         className="btn btn-outline"
@@ -238,8 +238,7 @@ export default function CalibrationRoomList() {
         <ul style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
           <li><strong>新規ルーム作成:</strong> 新しい部屋のキャリブレーションを行う場合は「新規ルーム作成」ボタンをクリック</li>
           <li><strong>使用する:</strong> このルームを機能1（室内測位）で使用する場合に選択</li>
-          <li><strong>追加測定:</strong> 既存のルームにキャリブレーション点を追加して精度を向上</li>
-          <li><strong>家具編集:</strong> ルーム内の家具やオブジェクトの配置を編集・更新</li>
+          <li><strong>編集:</strong> 既存のルームの部屋サイズを変更したり、キャリブレーション点を追加して精度を向上</li>
           <li><strong>削除:</strong> 不要になったルームを削除（復元できないのでご注意ください）</li>
         </ul>
       </div>

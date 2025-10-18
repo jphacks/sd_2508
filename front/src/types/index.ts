@@ -81,8 +81,13 @@ export interface RoomProfile {
   name: string;
   beacons: string[]; // beaconIdの配列
   calibrationPoints: CalibrationPoint[];
-  outline?: { width: number; height: number }; // メートル単位
+  outline?: { width: number; height: number }; // メートル単位（未指定の場合は正規化座標）
   furniture?: FurnitureItem[];
+  beaconPositions?: Array<{
+    id: string;
+    name: string;
+    position: { x: number; y: number }; // 0-1の正規化座標
+  }>;
   createdAt: string;
   updatedAt: string;
 }

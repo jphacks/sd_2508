@@ -14,6 +14,7 @@ import Management from './pages/Management';
 import Calibration from './pages/Calibration';
 import CalibrationRoomList from './pages/CalibrationRoomList';
 import AddCalibrationPoint from './pages/AddCalibrationPoint';
+import EditRoom from './pages/EditRoom';
 import Login from './pages/Login';
 import { AppMode } from './types';
 
@@ -65,7 +66,7 @@ function App() {
         <header className="header">
           <div className="header-content">
             <Link to="/" className="logo">
-              見守りカード
+              見守りカード（mimoca）
             </Link>
             <NavBar onLogout={handleLogout} />
           </div>
@@ -79,8 +80,7 @@ function App() {
           <Route path="/management" element={<Management />} />
           <Route path="/calibration" element={<CalibrationRoomList />} />
           <Route path="/calibration/:mode" element={<Calibration />} />
-          <Route path="/calibration/:mode/:roomId" element={<Calibration />} /> {/* 追加 */}
-          <Route path="/rooms" element={<CalibrationRoomList />} /> {/* 追加 */}
+          <Route path="/edit-room/:roomId" element={<EditRoom />} />
           <Route path="/add-calibration-point/:roomId" element={<AddCalibrationPoint />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

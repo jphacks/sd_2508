@@ -63,6 +63,10 @@ export default function Calibration() {
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<'se' | 'sw' | 'ne' | 'nw' | null>(null);
   const [originalSize, setOriginalSize] = useState<{width: number, height: number} | null>(null);
+  
+  // 部屋サイズの入力（オプショナル）
+  const [roomWidth, setRoomWidth] = useState<string>('');
+  const [roomHeight, setRoomHeight] = useState<string>('');
 
   const [isEditMode, setIsEditMode] = useState(false); // 編集モードかどうか
   const [originalRoomData, setOriginalRoomData] = useState<RoomProfile | null>(null);
@@ -257,26 +261,51 @@ export default function Calibration() {
       return;
     }
 
+    // 部屋サイズの処理：入力されていればメートル単位、なければundefined
+    const parsedWidth = roomWidth ? parseFloat(roomWidth) : null;
+    const parsedHeight = roomHeight ? parseFloat(roomHeight) : null;
+    
+    // 正規化された座標を計算（0~1の範囲）
+    // 実際の部屋サイズが入力されていない場合でも、正規化座標で保存
+    const normalizedFurniture = furniture.map(item => ({
+      ...item,
+      position: {
+        x: item.position.x / TEST_ROOM.width,
+        y: item.position.y / TEST_ROOM.height
+      },
+      width: item.width / TEST_ROOM.width,
+      height: item.height / TEST_ROOM.height
+    }));
+
+    // ビーコン位置も正規化して保存（将来的にドラッグ配置可能にする）
+    const normalizedBeacons = TEST_ROOM.beacons.map(beacon => ({
+      id: beacon.id,
+      name: beacon.name,
+      position: {
+        x: beacon.position.x / TEST_ROOM.width,
+        y: beacon.position.y / TEST_ROOM.height
+      }
+    }));
+
     const roomProfile: Partial<RoomProfile> = {
       name: roomName,
       beacons: selectedBeacons,
       calibrationPoints: calibrationPoints,
-      outline: { width: TEST_ROOM.width, height: TEST_ROOM.height },
-      furniture: furniture,
-      createdAt: originalRoomData?.createdAt || new Date().toISOString(),
+      outline: parsedWidth && parsedHeight 
+        ? { width: parsedWidth, height: parsedHeight }
+        : undefined, // サイズ未入力の場合はundefined
+      furniture: normalizedFurniture,
+      beaconPositions: normalizedBeacons, // ビーコン位置を正規化して保存
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     try {
-      if (isEditMode && roomId) {
-        // 編集モード：既存のドキュメントを更新
-        await updateDoc(doc(db, 'rooms', roomId), roomProfile);
-        alert(`「${roomName}」の家具配置が更新されました！`);
-      } else {
-        // 新規作成モード
-        await addDoc(collection(db, 'rooms'), roomProfile);
-        alert(`「${roomName}」の家具配置が保存されました！`);
-      }
+      await addDoc(collection(db, 'rooms'), roomProfile);
+      const sizeInfo = parsedWidth && parsedHeight 
+        ? `（${parsedWidth}m × ${parsedHeight}m）` 
+        : '（正規化座標で保存）';
+      alert(`「${roomName}」の家具配置が保存されました！${sizeInfo}`);
       navigate('/mode1');
     } catch (error) {
       console.error('保存エラー:', error);
@@ -507,7 +536,7 @@ export default function Calibration() {
       return;
     }
 
-    const currentStep = CALIBRATION_STEPS[step];
+    const currentStep = CALIBRATION_STEPS[step - 1];
     const point: CalibrationPoint = {
       id: currentStep.id,
       position: currentStep.position,
@@ -518,7 +547,7 @@ export default function Calibration() {
     setCalibrationPoints([...calibrationPoints, point]);
     setCurrentMeasurement(null);
     
-    if (step < CALIBRATION_STEPS.length - 1) {
+    if (step < CALIBRATION_STEPS.length) {
       setStep(step + 1);
     } else {
       // キャリブレーション完了
@@ -817,14 +846,59 @@ export default function Calibration() {
         <div style={{ display: 'flex', gap: '24px' }}>
           {/* 左側: コントロールパネル */}
           <div style={{ width: '300px' }}>
-            {isEditMode && (
-              <div className="card" style={{ marginBottom: '16px', backgroundColor: '#FFF3CD', border: '1px solid #FFEAA7' }}>
-                <h3 style={{ marginBottom: '12px', color: '#856404' }}>編集モード</h3>
-                <p style={{ fontSize: '14px', color: '#856404', margin: 0 }}>
-                  「{roomName}」の家具配置を編集しています
-                </p>
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ marginBottom: '16px' }}>部屋サイズ（オプション）</h3>
+              <p style={{ fontSize: '14px', color: '#7f8c8d', marginBottom: '12px' }}>
+                実際の部屋サイズを入力すると、メートル単位で保存されます。<br />
+                未入力の場合は、0~1の正規化座標で保存されます。
+              </p>
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>
+                    幅（メートル）
+                  </label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="例: 10"
+                    value={roomWidth}
+                    onChange={(e) => setRoomWidth(e.target.value)}
+                    step="0.1"
+                    min="0"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>
+                    高さ（メートル）
+                  </label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="例: 8"
+                    value={roomHeight}
+                    onChange={(e) => setRoomHeight(e.target.value)}
+                    step="0.1"
+                    min="0"
+                  />
+                </div>
               </div>
-            )}
+            </div>
+
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ marginBottom: '16px' }}>家具を追加</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {Object.entries(FURNITURE_TYPES).map(([type, info]) => (
+                  <button
+                    key={type}
+                    className="btn btn-outline"
+                    onClick={() => addFurniture(type as FurnitureType)} // 型アサーションを修正
+                  >
+                      {info.label}を追加
+                    </button>
+                ))}
+              </div>
+            </div>
+            
 
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>配置済みオブジェクト</h3>
