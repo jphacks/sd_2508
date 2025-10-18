@@ -34,11 +34,13 @@ export default function Management() {
     try {
       const snapshot = await getDocs(collection(db, 'beacons'));
       const data = snapshot.docs.map(doc => {
-        const raw = doc.data() as Beacon;
+        const raw = doc.data() as any;
+        // Firestore のドキュメント内部に beaconId フィールドが保存されている場合はそちらを優先
+        const resolvedBeaconId = typeof raw.beaconId === 'string' && raw.beaconId.length > 0 ? raw.beaconId : doc.id;
         return {
           ...raw,
-          rssiAt1m: raw.rssiAt1m ?? -59,
-          beaconId: doc.id
+          rssiAt1m: (typeof raw.rssiAt1m === 'number') ? raw.rssiAt1m : -59,
+          name: resolvedBeaconId,
         } as Beacon;
       });
       setBeacons(data);
@@ -338,6 +340,9 @@ export default function Management() {
                       const displayRssi = beacon.rssiAt1m;
                       return (
                         <tr key={beacon.beaconId} style={{ borderBottom: '1px solid #e1e8ed' }}>
+                          <td style={{ padding: '12px' }}>
+                            <strong>{beacon.name || '未設定'}</strong>
+                          </td>
                           <td style={{ padding: '12px', fontFamily: 'monospace', fontSize: '14px' }}>
                             {beacon.mac}
                           </td>
