@@ -60,11 +60,11 @@ def _fmt_mac(bs: bytes) -> str:
     return ":".join(f"{b:02x}" for b in bs)
 
 
-def _to_iso_utc(epoch_sec: int) -> str:
+def _to_iso_jst(epoch_sec: int) -> str:
     try:
-        return datetime.datetime.fromtimestamp(
-            epoch_sec, tz=datetime.timezone.utc
-        ).isoformat()
+        # UTC+9 (日本標準時)
+        jst = datetime.timezone(datetime.timedelta(hours=9))
+        return datetime.datetime.fromtimestamp(epoch_sec, tz=jst).isoformat()
     except Exception:
         return _now_iso()
 
@@ -106,7 +106,7 @@ def decode_t1000_hex(hexstr: str) -> dict:
                 "event_status": event_status,
                 "motion_segment": motion_seg,
                 "utc": utc,
-                "utc_iso": _to_iso_utc(utc),
+                "utc_iso": _to_iso_jst(utc),
                 "beacons": [
                     {"mac": mac1, "rssi": rssi1},
                     {"mac": mac2, "rssi": rssi2},
