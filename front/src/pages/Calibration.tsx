@@ -463,7 +463,7 @@ export default function Calibration() {
       return;
     }
 
-    const currentStep = CALIBRATION_STEPS[step];
+    const currentStep = CALIBRATION_STEPS[step - 1];
     const point: CalibrationPoint = {
       id: currentStep.id,
       position: currentStep.position,
@@ -474,7 +474,7 @@ export default function Calibration() {
     setCalibrationPoints([...calibrationPoints, point]);
     setCurrentMeasurement(null);
     
-    if (step < CALIBRATION_STEPS.length - 1) {
+    if (step < CALIBRATION_STEPS.length) {
       setStep(step + 1);
     } else {
       // キャリブレーション完了
