@@ -1,277 +1,85 @@
 {
-  "CARDS": {
+  "devices": {
     "2CF7F1C07030002F": {
-      "_v": 1,
-      "battery_dV": 39,
-      "ble": {
-        "DEVICE1": {
-          "channel": 37,
-          "loc_hint": {
-            "lat": 38.26,
-            "lon": 140.87
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADF9",
-              "rssi": -68,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADF9",
-              "rssi": -72,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        },
-        "DEVICE2": {
-          "channel": 38,
-          "loc_hint": {
-            "lat": 39.27,
-            "lon": 143.66
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADFA",
-              "rssi": -66,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADFA",
-              "rssi": -70,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        },
-        "DEVICE3": {
-          "channel": 39,
-          "loc_hint": {
-            "lat": 34.26,
-            "lon": 139.2
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADFF",
-              "rssi": -68,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADFF",
-              "rssi": -69,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        }
-      },
       "gps": {
-        "alt": 67.2,
-        "fix": true,
-        "hdop": 0.9,
-        "lat": 38.2601,
-        "lon": 140.8699,
-        "speed_mps": 0.7
+        "lat": 38.26015,
+        "lon": 140.86988,
+        "alt": 120.5,
+        "ts": "2025-10-18T09:31:49+00:00"
       },
-      "seq": 128,
-      "server_ts": 1760766496011,
-      "status": "ok",
-      "tags": [
-        "person",
-        "asset"
+      "beacons": [
+        {
+          "mac": "c3:00:00:42:ad:f9",
+          "rssi": -37,
+          "ts": "2025-10-18T09:31:49+00:00"
+        },
+        {
+          "mac": "c3:00:00:42:ad:fa",
+          "rssi": -44,
+          "ts": "2025-10-18T09:31:49+00:00"
+        },
+        {
+          "mac": "c3:00:00:42:ad:ff",
+          "rssi": -54,
+          "ts": "2025-10-18T09:31:49+00:00"
+        }
       ],
-      "ts": "2025-10-14T12:34:56Z"
+      "beaconsUpdatedAt": "2025-10-18T09:31:49+00:00",
+      "beaconsUpdatedAtServer": { ".sv": "timestamp" }
     },
     "2CF7F1C06490088C": {
-      "_v": 1,
-      "battery_dV": 39,
-      "ble": {
-        "DEVICE1": {
-          "channel": 37,
-          "loc_hint": {
-            "lat": 38.26,
-            "lon": 140.87
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADF9",
-              "rssi": -68,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADF9",
-              "rssi": -72,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        },
-        "DEVICE2": {
-          "channel": 38,
-          "loc_hint": {
-            "lat": 39.27,
-            "lon": 143.66
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADFA",
-              "rssi": -66,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADFA",
-              "rssi": -70,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        },
-        "DEVICE3": {
-          "channel": 39,
-          "loc_hint": {
-            "lat": 34.26,
-            "lon": 139.2
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADFF",
-              "rssi": -68,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADFF",
-              "rssi": -69,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        }
-      },
       "gps": {
-        "alt": 69.2,
-        "fix": true,
-        "hdop": 0.9,
-        "lat": 34.2601,
-        "lon": 145.8699,
-        "speed_mps": 0.7
+        "lat": 38.2602,
+        "lon": 140.86995,
+        "alt": 118.7,
+        "ts": "2025-10-18T09:31:49+00:00"
       },
-      "seq": 128,
-      "server_ts": 1760766496011,
-      "status": "ok",
-      "tags": [
-        "person",
-        "asset"
+      "beacons": [
+        {
+          "mac": "c3:00:00:42:ad:f9",
+          "rssi": -38,
+          "ts": "2025-10-18T09:31:49+00:00"
+        },
+        {
+          "mac": "c3:00:00:42:ad:fa",
+          "rssi": -45,
+          "ts": "2025-10-18T09:31:49+00:00"
+        },
+        {
+          "mac": "c3:00:00:42:ad:ff",
+          "rssi": -53,
+          "ts": "2025-10-18T09:31:49+00:00"
+        }
       ],
-      "ts": "2025-10-14T12:34:56Z"
+      "beaconsUpdatedAt": "2025-10-18T09:31:49+00:00",
+      "beaconsUpdatedAtServer": { ".sv": "timestamp" }
     },
     "2CF7F1C0703000AD": {
-      "_v": 1,
-      "battery_dV": 39,
-      "ble": {
-        "DEVICE1": {
-          "channel": 37,
-          "loc_hint": {
-            "lat": 38.26,
-            "lon": 140.87
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADF9",
-              "rssi": -69,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADF9",
-              "rssi": -72,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        },
-        "DEVICE2": {
-          "channel": 38,
-          "loc_hint": {
-            "lat": 39.27,
-            "lon": 143.66
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADFA",
-              "rssi": -66,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADFA",
-              "rssi": -70,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        },
-        "DEVICE3": {
-          "channel": 39,
-          "loc_hint": {
-            "lat": 34.26,
-            "lon": 139.2
-          },
-          "rssi_data": [
-            {
-              "mac": "C3000042ADFF",
-              "rssi": -69,
-              "txPower": 4
-            },
-            {
-              "mac": "C3000042ADFF",
-              "rssi": -66,
-              "txPower": 4
-            }
-          ],
-          "scanner": {
-            "appVer": "1.0.0",
-            "kind": "tracker"
-          }
-        }
-      },
       "gps": {
-        "alt": 67.2,
-        "fix": true,
-        "hdop": 0.9,
-        "lat": 30.2601,
-        "lon": 160.8699,
-        "speed_mps": 0.7
+        "lat": 38.26025,
+        "lon": 140.87001,
+        "alt": 121.2,
+        "ts": "2025-10-18T09:31:49+00:00"
       },
-      "seq": 128,
-      "server_ts": 1760766496011,
-      "status": "ok",
-      "tags": [
-        "person",
-        "asset"
+      "beacons": [
+        {
+          "mac": "c3:00:00:42:ad:f9",
+          "rssi": -39,
+          "ts": "2025-10-18T09:31:49+00:00"
+        },
+        {
+          "mac": "c3:00:00:42:ad:fa",
+          "rssi": -43,
+          "ts": "2025-10-18T09:31:49+00:00"
+        },
+        {
+          "mac": "c3:00:00:42:ad:ff",
+          "rssi": -52,
+          "ts": "2025-10-18T09:31:49+00:00"
+        }
       ],
-      "ts": "2025-10-14T12:34:56Z"
+      "beaconsUpdatedAt": "2025-10-18T09:31:49+00:00",
+      "beaconsUpdatedAtServer": { ".sv": "timestamp" }
     }
   }
 }
