@@ -279,7 +279,7 @@ export default function Management() {
                     <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
                       <th style={{ padding: '12px' }}>名前</th>
                       <th style={{ padding: '12px' }}>MACアドレス</th>
-                      <th style={{ padding: '12px' }}>送信電力</th>
+                      <th style={{ padding: '12px' }}>RSSI@1m</th>
                       <th style={{ padding: '12px' }}>操作</th>
                     </tr>
                   </thead>
@@ -343,13 +343,20 @@ export default function Management() {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">送信電力（dBm）</label>
+                  <label className="form-label">RSSI@1m（dBm）*</label>
                   <input
                     type="number"
                     name="txPower"
                     className="form-input"
                     defaultValue={-59}
+                    placeholder="例: -59"
+                    required
                   />
+                  <small style={{ color: '#7f8c8d', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                    ビーコン設置後、トラッカーをビーコンから1m離れた位置に置いて測定したRSSI値を入力してください。
+                    <br />
+                    この値はキャリブレーションの基準として使用されます。
+                  </small>
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button type="submit" className="btn btn-primary">
