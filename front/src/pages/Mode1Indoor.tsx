@@ -31,90 +31,73 @@ export default function Mode1Indoor() {
       } as Device & { id: string }));
       setDevices(devicesData);
 
-      // TODO: アクティブな部屋プロファイルを取得
-      // 仮のデータ
-      const mockRoomProfile: RoomProfile = {
-        roomId: 'room-001',
-        name: '会議室A',
-        beacons: ['beacon-1', 'beacon-2', 'beacon-3'],
-        calibrationPoints: [
-          {
-            id: 'p1',
-            position: { x: 0, y: 0 },
-            label: '左上隅',
-            measurements: []
-          },
-          {
-            id: 'p2',
-            position: { x: 10, y: 0 },
-            label: '右上隅',
-            measurements: []
-          },
-          {
-            id: 'p3',
-            position: { x: 10, y: 8 },
-            label: '右下隅',
-            measurements: []
-          },
-          {
-            id: 'p4',
-            position: { x: 0, y: 8 },
-            label: '左下隅',
-            measurements: []
-          },
-          {
-            id: 'p5',
-            position: { x: 5, y: 4 },
-            label: '中央',
-            measurements: []
-          }
-        ],
-        outline: { width: 10, height: 8 },
-        furniture: [
-          { id: 'f1', type: 'desk', position: { x: 3, y: 3 }, width: 2, height: 1 },
-          { id: 'f2', type: 'door', position: { x: 5, y: 0 }, width: 1, height: 0.2 }
-        ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      setRoomProfile(mockRoomProfile);
+      // アクティブな部屋プロファイルを取得
+      const configSnapshot = await getDocs(collection(db, 'appConfig'));
+      const userConfig = configSnapshot.docs.find(d => d.data().userId === userId);
+      
+      let activeRoomId: string | null = null;
+      if (userConfig && userConfig.data().mode1?.roomId) {
+        activeRoomId = userConfig.data().mode1.roomId;
+      }
 
-      // 各デバイスのBLEスキャンデータを監視
-      devicesData.forEach(device => {
-        const scansRef = ref(rtdb, `devices/${device.devEUI}/ble_scans`);
-        onValue(scansRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            const scans = Object.values(data) as BLEScan[];
-            const latestScan = scans[scans.length - 1];
-            
-            if (latestScan && mockRoomProfile) {
-              // RSSI値を抽出
-              const rssiMap: { [mac: string]: number } = {};
-              latestScan.beacons.forEach(beacon => {
-                rssiMap[beacon.mac] = beacon.rssi;
-              });
+      if (!activeRoomId) {
+        // アクティブなルームが設定されていない場合、最新のルームを使用
+        const roomsSnapshot = await getDocs(collection(db, 'rooms'));
+        if (roomsSnapshot.docs.length > 0) {
+          const latestRoom = roomsSnapshot.docs.sort((a, b) => {
+            const aTime = new Date(a.data().createdAt).getTime();
+            const bTime = new Date(b.data().createdAt).getTime();
+            return bTime - aTime;
+          })[0];
+          activeRoomId = latestRoom.id;
+        }
+      }
 
-              // 位置を推定
-              const position = estimatePositionByFingerprinting(
-                rssiMap,
-                mockRoomProfile.calibrationPoints
-              );
+      if (activeRoomId) {
+        const roomDoc = await getDoc(doc(db, 'rooms', activeRoomId));
+        if (roomDoc.exists()) {
+          const roomData = { roomId: roomDoc.id, ...roomDoc.data() } as RoomProfile;
+          setRoomProfile(roomData);
 
-              if (position) {
-                setDevicePositions(prev => {
-                  const newMap = new Map(prev);
-                  newMap.set(device.devEUI, { x: position.x, y: position.y });
-                  return newMap;
+          // 各デバイスのBLEスキャンデータを監視
+          devicesData.forEach(device => {
+            const trackerRef = ref(rtdb, `CARDS/${device.devEUI}`);
+            onValue(trackerRef, (snapshot) => {
+              const data = snapshot.val();
+              if (data && data.ble && roomData) {
+                // 各ビーコンからRSSI値を取得して平均化
+                const rssiMap: { [beaconId: string]: number } = {};
+                
+                Object.entries(data.ble).forEach(([beaconId, beaconData]: [string, any]) => {
+                  if (beaconData.rssi_data && Array.isArray(beaconData.rssi_data)) {
+                    // rssi_data配列から平均RSSI値を計算
+                    const rssiValues = beaconData.rssi_data.map((item: any) => item.rssi);
+                    const averageRssi = rssiValues.reduce((sum: number, rssi: number) => sum + rssi, 0) / rssiValues.length;
+                    rssiMap[beaconId] = averageRssi;
+                  }
                 });
 
-                // 部屋の外に出たかチェック
-                checkRoomExit(device, position, mockRoomProfile);
+                // 位置を推定
+                const position = estimatePositionByFingerprinting(
+                  rssiMap,
+                  roomData.calibrationPoints
+                );
+
+                if (position) {
+                  setDevicePositions(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(device.devEUI, { x: position.x, y: position.y });
+                    return newMap;
+                  });
+
+                  // 部屋の外に出たかチェック
+                  checkRoomExit(device, position, roomData);
+                }
               }
-            }
-          }
-        });
-      });
+            });
+          });
+        }
+      }
 
       setLoading(false);
     } catch (error) {

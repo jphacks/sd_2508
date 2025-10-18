@@ -307,7 +307,7 @@ export default function Calibration() {
                 <option value="">選択してください</option>
                 {devices.map(device => (
                   <option key={device.devEUI} value={device.devEUI}>
-                    {device.userName || device.deviceId}
+                    {device.deviceId || device.userName}
                   </option>
                 ))}
               </select>

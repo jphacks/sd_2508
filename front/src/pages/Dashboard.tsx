@@ -1,4 +1,7 @@
 import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
 import { AppMode } from '../types';
 
 interface DashboardProps {
@@ -8,13 +11,42 @@ interface DashboardProps {
 
 export default function Dashboard({ currentMode, setCurrentMode }: DashboardProps) {
   const navigate = useNavigate();
+  const [calibrationStatus, setCalibrationStatus] = useState<{ [key in AppMode]?: boolean }>({});
+
+  useEffect(() => {
+    checkCalibrationStatus();
+  }, []);
+
+  const checkCalibrationStatus = async () => {
+    try {
+      // TODO: 実際のユーザーIDを使用
+      const userId = 'demo-user';
+      
+      // 機能1: ルームが存在するかチェック
+      const roomsSnapshot = await getDocs(collection(db, 'rooms'));
+      const hasRooms = roomsSnapshot.docs.length > 0;
+      
+      // 機能2: TODO: ビーコン設定をチェック（現在は常にtrue）
+      const mode2Calibrated = true;
+      
+      // 機能3: キャリブレーション不要
+      const mode3Calibrated = true;
+      
+      setCalibrationStatus({
+        mode1: hasRooms,
+        mode2: mode2Calibrated,
+        mode3: mode3Calibrated
+      });
+    } catch (error) {
+      console.error('キャリブレーション状態確認エラー:', error);
+    }
+  };
 
   const handleModeChange = (mode: AppMode) => {
     setCurrentMode(mode);
     
-    // TODO: キャリブレーション状態をFirestoreから確認
-    // キャリブレーション未完了の場合は、キャリブレーション画面に遷移
-    const calibrated = false; // 仮の値
+    // キャリブレーション状態を確認
+    const calibrated = calibrationStatus[mode];
     
     if (!calibrated && mode !== 'mode3') {
       navigate(`/calibration/${mode}`);
