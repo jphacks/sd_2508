@@ -100,13 +100,14 @@ export interface CalibrationPoint {
 }
 
 // 家具アイテム
+export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair' | 'door';
+
 export interface FurnitureItem {
   id: string;
-  type: 'desk' | 'tv' | 'piano' | 'door' | 'window' | 'chair' | 'bed';
+  type: FurnitureType; // string から FurnitureType に変更
   position: { x: number; y: number };
-  rotation?: number;
-  width?: number;
-  height?: number;
+  width: number;
+  height: number;
 }
 
 // アプリケーションモード
