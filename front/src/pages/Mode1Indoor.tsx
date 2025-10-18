@@ -17,8 +17,11 @@ export default function Mode1Indoor() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
   const [devicePositions, setDevicePositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const [deviceTimestamps, setDeviceTimestamps] = useState<Map<string, string>>(new Map());
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alertOnExit, setAlertOnExit] = useState(true);
+  const [alertSound, setAlertSound] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -92,21 +95,38 @@ export default function Mode1Indoor() {
 
           // 各デバイスのBLEスキャンデータを監視
           devicesData.forEach(device => {
-            const trackerRef = ref(rtdb, `CARDS/${device.devEUI}`);
+            // デバイスIDを小文字に正規化（RTDBと一致させる）
+            const normalizedDeviceId = device.devEUI.toLowerCase();
+            const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+            
+            console.log(`📍 Mode1: ${device.deviceId}の監視開始`, { devEUI: device.devEUI, normalized: normalizedDeviceId });
+            
             onValue(trackerRef, (snapshot) => {
               const data = snapshot.val();
-              if (data && data.ble && roomData) {
-                // 各ビーコンからRSSI値を取得して平均化
+              if (data && data.beacons && roomData) {
+                console.log(`📡 ${device.deviceId}のRTDB更新:`, { timestamp: data.beaconsUpdatedAt, beaconsCount: data.beacons.length });
+                
+                // タイムスタンプを保存
+                if (data.beaconsUpdatedAt) {
+                  setDeviceTimestamps(prev => {
+                    const newMap = new Map(prev);
+                    newMap.set(device.devEUI, data.beaconsUpdatedAt);
+                    return newMap;
+                  });
+                }
+
+                // 各ビーコンからRSSI値を取得
                 const rssiMap: { [beaconId: string]: number } = {};
                 
-                Object.entries(data.ble).forEach(([beaconId, beaconData]: [string, any]) => {
-                  if (beaconData.rssi_data && Array.isArray(beaconData.rssi_data)) {
-                    // rssi_data配列から平均RSSI値を計算
-                    const rssiValues = beaconData.rssi_data.map((item: any) => item.rssi);
-                    const averageRssi = rssiValues.reduce((sum: number, rssi: number) => sum + rssi, 0) / rssiValues.length;
-                    rssiMap[beaconId] = averageRssi;
+                data.beacons.forEach((beacon: any) => {
+                  if (beacon.mac && beacon.rssi) {
+                    // MACアドレスを正規化（コロン区切りを大文字に統一）
+                    const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, '');
+                    rssiMap[normalizedMac] = beacon.rssi;
                   }
                 });
+                
+                console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
 
                 // ハイブリッド位置推定（Fingerprinting + 三辺測量）
                 const position = estimatePositionHybrid(
@@ -182,8 +202,41 @@ export default function Mode1Indoor() {
     setAlerts(prev => prev.filter(a => a.id !== alertId));
   };
 
+  const formatTimestamp = (timestamp: string): string => {
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffSecs = Math.floor((diffMs % 60000) / 1000);
 
-  // drawRoom関数の完全版
+      if (diffMins === 0) {
+        return `${diffSecs}秒前`;
+      } else if (diffMins < 60) {
+        return `${diffMins}分前`;
+      } else {
+        const hours = Math.floor(diffMins / 60);
+        if (hours < 24) {
+          return `${hours}時間前`;
+        } else {
+          return date.toLocaleString('ja-JP', { 
+            month: '2-digit', 
+            day: '2-digit', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          });
+        }
+      }
+    } catch {
+      return '不明';
+    }
+  };
+
+  useEffect(() => {
+    if (roomProfile && canvasRef.current) {
+      drawRoom();
+    }
+  }, [roomProfile, devicePositions]);
 
   const drawRoom = () => {
     const canvas = canvasRef.current;
@@ -371,9 +424,14 @@ export default function Mode1Indoor() {
 
   return (
     <div className="container">
-      <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-        機能1: 室内位置追跡
-      </h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
+          機能1 : 室内位置追跡
+        </h1>
+        <h2 style={{ fontSize: '24px', fontWeight: '600', color: '#2c3e50', margin: 0 }}>
+          部屋: {roomProfile?.name || '未設定'}
+        </h2>
+      </div>
 
       {alerts.map(alert => (
         <div key={alert.id} className="alert alert-danger">
@@ -398,72 +456,134 @@ export default function Mode1Indoor() {
         </div>
       ))}
 
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>
-          部屋: {roomProfile?.name || '未設定'}
-        </h2>
-        <div style={{ position: 'relative', width: '100%', height: '600px' }}>
-          <canvas
-            ref={canvasRef}
-            width={800}
-            height={600}
-            style={{ width: '100%', height: '100%', border: '1px solid #e1e8ed', borderRadius: '8px' }}
-          />
-        </div>
-      </div>
+      <div style={{ display: 'flex', gap: '24px' }}>
+        {/* 左側: ユーザー名と設定 */}
+        <div style={{ width: '300px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="card">
+            <h3 style={{ marginBottom: '12px' }}>ユーザー名</h3>
+            {devices.map(device => {
+              const position = devicePositions.get(device.devEUI);
+              const timestamp = deviceTimestamps.get(device.devEUI);
+              return (
+                <div
+                  key={device.devEUI}
+                  style={{
+                    padding: '12px',
+                    borderBottom: '1px solid #e1e8ed',
+                    display: 'flex',
+                    justifyContent: 'space-between'
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
+                      <strong>{device.userName || device.deviceId}</strong>
+                      <span style={{ fontSize: '12px', color: '#95a5a6' }}>
+                        ({device.deviceId})
+                      </span>
+                    </div>
+                    {position && (
+                      <p style={{ fontSize: '12px', marginTop: '4px', color: '#7f8c8d' }}>
+                        位置: ({position.x.toFixed(2)}m, {position.y.toFixed(2)}m)
+                      </p>
+                    )}
+                    {timestamp && (
+                      <p style={{ fontSize: '12px', marginTop: '2px', color: '#95a5a6' }}>
+                        更新: {formatTimestamp(timestamp)}
+                      </p>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: position ? '#50C878' : '#95a5a6',
+                      marginTop: '4px'
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
 
-      <div className="grid grid-2">
-        <div className="card">
-          <h3 style={{ marginBottom: '12px' }}>トラッカー一覧</h3>
-          {devices.map(device => {
-            const position = devicePositions.get(device.devEUI);
-            return (
-              <div
-                key={device.devEUI}
+          <div className="card">
+            <h3 style={{ marginBottom: '12px' }}>設定</h3>
+            <div className="form-group">
+              <label className="form-label">部屋退出時の警告</label>
+              <button
+                onClick={() => setAlertOnExit(!alertOnExit)}
                 style={{
-                  padding: '12px',
-                  borderBottom: '1px solid #e1e8ed',
                   display: 'flex',
-                  justifyContent: 'space-between'
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: alertOnExit ? '#50C878' : '#E0E0E0',
+                  color: alertOnExit ? 'white' : '#666'
                 }}
               >
-                <div>
-                  <strong>{device.userName || device.deviceId}</strong>
-                  {position && (
-                    <p style={{ fontSize: '12px', marginTop: '4px', color: '#7f8c8d' }}>
-                      位置: ({position.x.toFixed(2)}m, {position.y.toFixed(2)}m)
-                    </p>
-                  )}
-                </div>
                 <div
                   style={{
-                    width: '12px',
-                    height: '12px',
+                    width: '20px',
+                    height: '20px',
                     borderRadius: '50%',
-                    backgroundColor: position ? '#50C878' : '#95a5a6',
-                    marginTop: '4px'
+                    backgroundColor: 'white',
+                    transition: 'transform 0.3s ease',
+                    transform: alertOnExit ? 'translateX(0)' : 'translateX(0)'
                   }}
                 />
-              </div>
-            );
-          })}
+                {alertOnExit ? '有効' : '無効'}
+              </button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">警告音</label>
+              <button
+                onClick={() => setAlertSound(!alertSound)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: alertSound ? '#50C878' : '#E0E0E0',
+                  color: alertSound ? 'white' : '#666'
+                }}
+              >
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: 'white',
+                    transition: 'transform 0.3s ease',
+                    transform: alertSound ? 'translateX(0)' : 'translateX(0)'
+                  }}
+                />
+                {alertSound ? '有効' : '無効'}
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="card">
-          <h3 style={{ marginBottom: '12px' }}>設定</h3>
-          <div className="form-group">
-            <label className="form-label">部屋退出時の警告</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" defaultChecked />
-              有効
-            </label>
-          </div>
-          <div className="form-group">
-            <label className="form-label">警告音</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" defaultChecked />
-              有効
-            </label>
+        {/* 右側: 部屋表示パネル */}
+        <div className="card" style={{ flex: 1 }}>
+          <div style={{ position: 'relative', width: '100%', height: '600px' }}>
+            <canvas
+              ref={canvasRef}
+              width={800}
+              height={600}
+              style={{ width: '100%', height: '100%', border: '1px solid #e1e8ed', borderRadius: '8px' }}
+            />
           </div>
         </div>
       </div>

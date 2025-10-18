@@ -48,6 +48,8 @@ body {
   align-items: center;
   gap: 8px;
   text-decoration: none;
+  height: fit-content;
+  white-space: nowrap;
 }
 
 .btn:hover {
@@ -82,11 +84,22 @@ body {
   background-color: transparent;
   border: 2px solid var(--primary-color);
   color: var(--primary-color);
+  padding: 10px 22px;
 }
 
 .btn-outline:hover {
   background-color: var(--primary-color);
   color: white;
+}
+
+/* コンパクト表示（テーブルの操作ボタン用） */
+.btn-compact {
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.btn-outline.btn-compact {
+  padding: 4px 10px;
 }
 
 /* カードスタイル */

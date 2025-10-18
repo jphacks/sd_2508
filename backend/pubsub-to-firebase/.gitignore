@@ -67,9 +67,3 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
-
-# production
-dist/
-
-.venv/
-__pychache__/
