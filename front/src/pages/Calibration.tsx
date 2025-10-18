@@ -52,7 +52,7 @@ export default function Calibration() {
   const [calibrationPoints, setCalibrationPoints] = useState<CalibrationPoint[]>([]);
   const [currentMeasurement, setCurrentMeasurement] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [showFurniture, setShowFurniture] = useState(mode === 'furniture' || true);
+  const [showFurniture, setShowFurniture] = useState(false);
   const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -207,10 +207,21 @@ export default function Calibration() {
   };
 
   const saveCalibration = async () => {
+    // データの検証
+    if (!roomName) {
+      alert('部屋名が設定されていません');
+      return;
+    }
+    
+    if (selectedBeacons.length === 0) {
+      alert('ビーコンが選択されていません');
+      return;
+    }
+
     const roomProfile: Partial<RoomProfile> = {
-      name: TEST_ROOM.name,
-      beacons: TEST_ROOM.beacons.map(b => b.id),
-      calibrationPoints: [],
+      name: roomName,
+      beacons: selectedBeacons,
+      calibrationPoints: calibrationPoints,
       outline: { width: TEST_ROOM.width, height: TEST_ROOM.height },
       furniture: furniture,
       createdAt: new Date().toISOString(),
@@ -219,13 +230,14 @@ export default function Calibration() {
 
     try {
       await addDoc(collection(db, 'rooms'), roomProfile);
-      alert('家具配置が保存されました！');
+      alert(`「${roomName}」の家具配置が保存されました！`);
       navigate('/mode1');
     } catch (error) {
       console.error('保存エラー:', error);
       alert('保存に失敗しました');
     }
   };
+
 
   const getResizeHandle = (e: React.MouseEvent<HTMLCanvasElement>, item: FurnitureItem) => {
     const canvas = canvasRef.current;
