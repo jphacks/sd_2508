@@ -122,9 +122,6 @@ def decode_t1000_hex(hexstr: str) -> dict:
     return out
 
 
-# ==== 追加ここまで ====
-
-
 # —— 外側JSON・内側ペイロードまで保存する最小実装 ——
 def pubsub_to_rtdb(data, context):
     if not _ensure_firebase():
@@ -178,30 +175,30 @@ def pubsub_to_rtdb(data, context):
     dedup_key = _safe_key(dedup)
 
     # まず原本を保存（そのまま）
-    raw_doc = {
-        "raw": data,  # Pub/Sub から受けたそのまま（attributes, data(base64) 等）
-        "context": _ctx_summary(context),
-        "receivedAt": _now_iso(),
-        "serverTs": _server_ts(),
-    }
-    db.reference(f"raw/pubsub/{dedup_key}").transaction(lambda cur: cur or raw_doc)
-    print(f"RAW saved at /raw/pubsub/{dedup}")
+    # raw_doc = {
+    #     "raw": data,  # Pub/Sub から受けたそのまま（attributes, data(base64) 等）
+    #     "context": _ctx_summary(context),
+    #     "receivedAt": _now_iso(),
+    #     "serverTs": _server_ts(),
+    # }
+    # db.reference(f"raw/pubsub/{dedup_key}").transaction(lambda cur: cur or raw_doc)
+    # print(f"RAW saved at /raw/pubsub/{dedup}")
 
     # uplink JSON を保存（あれば）
-    if uplink:
-        db.reference(f"devices/{dev_key}/events/{dedup_key}").set(
-            {
-                "uplink": uplink,  # 外側JSONをそのまま格納
-                "attributes": attrs,
-                "meta": {
-                    "messageId": message_id,
-                    "publishTime": publish_time,
-                    "savedAt": _now_iso(),
-                    "serverTs": _server_ts(),
-                    "source": "pubsub/chirpstack",
-                },
-            }
-        )
+    # if uplink:
+    #     db.reference(f"devices/{dev_key}/events/{dedup_key}").set(
+    #         {
+    #             "uplink": uplink,  # 外側JSONをそのまま格納
+    #             "attributes": attrs,
+    #             "meta": {
+    #                 "messageId": message_id,
+    #                 "publishTime": publish_time,
+    #                 "savedAt": _now_iso(),
+    #                 "serverTs": _server_ts(),
+    #                 "source": "pubsub/chirpstack",
+    #             },
+    #         }
+    #     )
 
     # ② uplink.data（アプリペイロード）の Base64 → 生バイト
     inner_b64 = uplink.get("data") if isinstance(uplink, dict) else None
@@ -209,30 +206,30 @@ def pubsub_to_rtdb(data, context):
         try:
             raw_b = base64.b64decode(inner_b64)
             hexstr = raw_b.hex()
-            db.reference(f"devices/{dev_key}/t1000_raw/{dedup_key}").set(
-                {
-                    "base64": inner_b64,
-                    "hex": hexstr,
-                    "length": len(raw_b),
-                    "eventTime": uplink.get("time") or publish_time,
-                    "savedAt": _now_iso(),
-                    "serverTs": _server_ts(),
-                }
-            )
+            # db.reference(f"devices/{dev_key}/t1000_raw/{dedup_key}").set(
+            #     {
+            #         "base64": inner_b64,
+            #         "hex": hexstr,
+            #         "length": len(raw_b),
+            #         "eventTime": uplink.get("time") or publish_time,
+            #         "savedAt": _now_iso(),
+            #         "serverTs": _server_ts(),
+            #     }
+            # )
 
             # 再デコードして詳細を保存 & beacons に反映
             decoded = decode_t1000_hex(hexstr)
-            db.reference(f"devices/{dev_key}/t1000_decoded/{dedup_key}").set(
-                {
-                    **decoded,
-                    "meta": {
-                        "messageId": message_id,
-                        "publishTime": publish_time,
-                        "savedAt": _now_iso(),
-                        "serverTs": _server_ts(),
-                    },
-                }
-            )
+            # db.reference(f"devices/{dev_key}/t1000_decoded/{dedup_key}").set(
+            #     {
+            #         **decoded,
+            #         "meta": {
+            #             "messageId": message_id,
+            #             "publishTime": publish_time,
+            #             "savedAt": _now_iso(),
+            #             "serverTs": _server_ts(),
+            #         },
+            #     }
+            # )
 
             # frame_id 0x08 の場合は beacons を snapshot＋履歴に書き込む
             if decoded.get("frame_id") == 0x08 and decoded.get("beacons"):
