@@ -60,6 +60,21 @@ def _fmt_mac(bs: bytes) -> str:
     return ":".join(f"{b:02x}" for b in bs)
 
 
+def _event_flags_byte(event_status: int) -> dict:
+    # 下位8bitだけを見る（0x00FF）
+    eb = event_status & 0xFF
+    return {
+        "start_moving": bool(eb & 0x01),
+        "end_movement": bool(eb & 0x02),
+        "motionless": bool(eb & 0x04),
+        "shock": bool(eb & 0x08),
+        "temp_event": bool(eb & 0x10),
+        "light_event": bool(eb & 0x20),
+        "sos": bool(eb & 0x40),
+        "press_once": bool(eb & 0x80),
+    }
+
+
 def _to_iso_jst(epoch_sec: int) -> str:
     try:
         # UTC+9 (日本標準時)
@@ -88,6 +103,7 @@ def decode_t1000_hex(hexstr: str) -> dict:
 
     if fid == 0x08 and len(b) >= 35:
         event_status = (b[1] << 16) | (b[2] << 8) | b[3]
+        flags = _event_flags_byte(event_status)
         motion_seg = b[4]
         utc = int.from_bytes(b[5:9], "big", signed=False)
 
@@ -116,6 +132,9 @@ def decode_t1000_hex(hexstr: str) -> dict:
                 "temperature_c": temp_raw / 10.0,
                 "light_pct": light_raw,
                 "battery_pct": battery,
+                # イベントフラグと motion_detect の判定
+                "events": flags,
+                "motion_detect": bool(flags["start_moving"] or flags["shock"]),
             }
         )
         return out
@@ -249,10 +268,47 @@ def pubsub_to_rtdb(data, context):
                         "battery_pct": decoded.get("battery_pct"),
                         "temperature_c": decoded.get("temperature_c"),
                         "light_pct": decoded.get("light_pct"),
+                        "motion_detect": decoded.get("motion_detect"),
+                        "events": decoded.get("events"),
                         "savedAt": ts_iso,
                         "savedAtServer": _server_ts(),
                     }
                 )
+                # --- ここから：デバイスの現在ステータスを更新（shock / motion など） ---
+                events = decoded.get("events") or {}
+                motion_detect = bool(decoded.get("motion_detect"))
+                is_shock = bool(events.get("shock"))
+                # 代表イベント名を1つ決めたい場合は優先順位で選ぶ
+                event_name = (
+                    "shock" if is_shock else
+                    ("start_moving" if events.get("start_moving") else
+                     ("end_movement" if events.get("end_movement") else
+                      ("motionless" if events.get("motionless") else
+                       ("press_once" if events.get("press_once") else
+                        ("sos" if events.get("sos") else
+                         ("temp_event" if events.get("temp_event") else
+                          ("light_event" if events.get("light_event") else None)))))))
+                )
+
+                status_payload = {
+                    "motion": motion_detect,
+                    "shock": is_shock,
+                    "lastEvent": event_name,
+                    "lastEventRaw": decoded.get("event_status"),
+                    "lastEventFrameId": "0x08",
+                    "lastEventDedup": dedup_key,
+                    "lastEventAt": ts_iso,
+                    "lastEventAtServer": _server_ts(),
+                }
+                db.reference(f"devices/{dev_key}/status").update(status_payload)
+
+                # オプション：ショック回数カウンタ
+                # if is_shock:
+                #     db.reference(f"devices/{dev_key}/status/shock_count").transaction(
+                #         lambda cur: (cur or 0) + 1
+                #     )
+                # --- ここまで：デバイスの現在ステータスを更新 ---
+                print(f"decoded T1000 beacons{dev_key}: {decoded}")
                 print("Saved beacons from T1000 0x08")
         except Exception as e:
             print("WARN: inner payload base64 decode failed:", e)
