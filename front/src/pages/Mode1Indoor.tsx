@@ -336,6 +336,77 @@ export default function Mode1Indoor() {
       });
     }
 
+    // ドアを描画（キャリブレーションポイントから取得）
+    if (roomProfile.calibrationPoints) {
+      const doorInside = roomProfile.calibrationPoints.find(p => p.id === 'door_inside');
+      const doorOutside = roomProfile.calibrationPoints.find(p => p.id === 'door_outside');
+      
+      if (doorInside && doorOutside) {
+        // ドアの中心位置を計算
+        const doorCenterX = (doorInside.position.x + doorOutside.position.x) / 2;
+        const doorCenterY = (doorInside.position.y + doorOutside.position.y) / 2;
+        
+        // ドアの向きを計算（内側→外側のベクトル）
+        const doorVectorX = doorOutside.position.x - doorInside.position.x;
+        const doorVectorY = doorOutside.position.y - doorInside.position.y;
+        const doorAngle = Math.atan2(doorVectorY, doorVectorX);
+        
+        // ドアのサイズ（メートル単位）
+        const doorWidth = 0.9; // 0.9m幅
+        const doorThickness = 0.05; // 5cm厚
+        
+        // メートル位置に変換
+        const doorDisplayX = doorCenterX * roomProfile.outline!.width;
+        const doorDisplayY = doorCenterY * roomProfile.outline!.height;
+        
+        const x = padding + doorDisplayX * scale;
+        const y = padding + doorDisplayY * scale;
+        
+        // ドアを描画（回転を考慮）
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(doorAngle + Math.PI / 2); // ベクトルに垂直
+        
+        // ドアの矩形（幅0.9m、厚さ5cm）
+        const doorW = doorWidth * scale;
+        const doorH = doorThickness * scale;
+        
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-doorW / 2, -doorH / 2, doorW, doorH);
+        
+        // ドアの境界線
+        ctx.strokeStyle = '#8B4513';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-doorW / 2, -doorH / 2, doorW, doorH);
+        
+        // ドアノブ（小さい円）
+        ctx.beginPath();
+        ctx.arc(doorW / 2 - 10, 0, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFD700';
+        ctx.fill();
+        ctx.strokeStyle = '#DAA520';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        ctx.restore();
+        
+        // ドアアイコンとラベル
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#8B4513';
+        ctx.fillText('🚪', x, y);
+        
+        // ラベル「ドア」
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#8B4513';
+        ctx.lineWidth = 3;
+        ctx.strokeText('ドア', x, y + 20);
+        ctx.fillText('ドア', x, y + 20);
+      }
+    }
+
     // デバイスの位置を描画（最前面）
     if (devicePositions.size > 0) {
       console.log('Drawing devices:', devicePositions.size);
@@ -435,7 +506,7 @@ export default function Mode1Indoor() {
 
   return (
     <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
           機能1 : 室内位置追跡
         </h1>
@@ -467,9 +538,9 @@ export default function Mode1Indoor() {
         </div>
       ))}
 
-      <div style={{ display: 'flex', gap: '24px' }}>
+      <div style={{ display: 'flex', gap: '24px', flexDirection: window.innerWidth <= 768 ? 'column' : 'row' }}>
         {/* 左側: ユーザー名と設定 */}
-        <div style={{ width: '300px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ width: window.innerWidth <= 768 ? '100%' : '300px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="card">
             <h3 style={{ marginBottom: '12px' }}>ユーザー名</h3>
             {devices.map(device => {
@@ -588,7 +659,7 @@ export default function Mode1Indoor() {
 
         {/* 右側: 部屋表示パネル */}
         <div className="card" style={{ flex: 1 }}>
-          <div style={{ position: 'relative', width: '100%', height: '600px' }}>
+          <div style={{ position: 'relative', width: '100%', height: window.innerWidth <= 768 ? '400px' : '600px' }}>
             <canvas
               ref={canvasRef}
               width={800}

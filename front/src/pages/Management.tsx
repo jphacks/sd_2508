@@ -219,8 +219,8 @@ export default function Management() {
       {activeTab === 'devices' && (
         <div>
           <div className="card" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2>トラッカー一覧</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <h2 style={{ margin: 0 }}>トラッカー一覧</h2>
               <button className="btn btn-primary" onClick={() => setShowAddDevice(true)}>
                 ＋ トラッカー追加
               </button>
@@ -231,7 +231,7 @@ export default function Management() {
                 登録されているトラッカーはありません
               </p>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="table-container">
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
@@ -278,7 +278,8 @@ export default function Management() {
                               {device.status === 'active' ? 'アクティブ' : '非アクティブ'}
                             </span>
                           </td>
-                          <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
+                          <td style={{ padding: '12px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {isEditing ? (
                               <>
                                 <button
@@ -314,6 +315,7 @@ export default function Management() {
                                 </button>
                               </>
                             )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -391,8 +393,8 @@ export default function Management() {
       {activeTab === 'beacons' && (
         <div>
           <div className="card" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2>ビーコン一覧</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <h2 style={{ margin: 0 }}>ビーコン一覧</h2>
               <button className="btn btn-primary" onClick={() => setShowAddBeacon(true)}>
                 ＋ ビーコン追加
               </button>
@@ -403,7 +405,7 @@ export default function Management() {
                 登録されているビーコンはありません
               </p>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
+              <div className="table-container">
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
@@ -438,7 +440,8 @@ export default function Management() {
                               displayRssi !== undefined ? `${displayRssi} dBm` : '未設定'
                             )}
                           </td>
-                          <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
+                          <td style={{ padding: '12px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {isEditing ? (
                               <>
                                 <button
@@ -474,6 +477,7 @@ export default function Management() {
                                 </button>
                               </>
                             )}
+                            </div>
                           </td>
                         </tr>
                       );

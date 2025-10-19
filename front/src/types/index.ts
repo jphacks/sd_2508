@@ -105,7 +105,7 @@ export interface CalibrationPoint {
 }
 
 // 家具アイテム
-export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair' | 'door';
+export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair';
 
 export interface FurnitureItem {
   id: string;

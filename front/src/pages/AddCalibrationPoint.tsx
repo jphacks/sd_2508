@@ -292,7 +292,8 @@ export default function AddCalibrationPoint() {
       return;
     }
 
-    if (!pointLabel.trim()) {
+    // ドア内側・外側の測定時はラベル不要
+    if (mode !== 'door_inside' && mode !== 'door_outside' && !pointLabel.trim()) {
       alert('測定ポイントのラベルを入力してください');
       return;
     }
@@ -573,14 +574,14 @@ export default function AddCalibrationPoint() {
             onClick={() => setMode('door_inside')}
             style={{ padding: '16px' }}
           >
-            🚪➡️ ドア内側再測定
+            🚪 ドア内側再測定
           </button>
           <button
             className={`btn ${mode === 'door_outside' ? 'btn-primary' : 'btn-outline'}`}
             onClick={() => setMode('door_outside')}
             style={{ padding: '16px' }}
           >
-            🚪⬅️ ドア外側再測定
+            🚪 ドア外側再測定
           </button>
         </div>
       </div>

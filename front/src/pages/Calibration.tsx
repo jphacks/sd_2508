@@ -79,8 +79,7 @@ const getFurnitureTypes = (roomWidth: number, roomHeight: number) => {
     desk: { width: 0.3, height: 0.2 },
     tv: { width: 0.3, height: 0.05 },
     piano: { width: 0.2, height: 0.15 },
-    chair: { width: 0.05, height: 0.05 },
-    door: { width: 0.2, height: 0.05 }
+    chair: { width: 0.05, height: 0.05 }
   };
 
   // 正規化座標に変換
@@ -108,17 +107,11 @@ const getFurnitureTypes = (roomWidth: number, roomHeight: number) => {
       width: baseSizes.chair.width / roomWidth, 
       height: baseSizes.chair.height / roomHeight, 
       color: '#CD853F' 
-    },
-    door: { 
-      label: 'ドア', 
-      width: baseSizes.door.width / roomWidth, 
-      height: baseSizes.door.height / roomHeight, 
-      color: '#D2691E' 
     }
   } as const;
 };
 
-export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair' | 'door';
+export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair';
 
 
 export default function Calibration() {
@@ -317,133 +310,6 @@ export default function Calibration() {
       // 右の辺
       return { x: 1.0, y: Math.max(0, Math.min(1.0, y)) };
     }
-  };
-
-  // ドア位置推定関数を追加
-  // estimateDoorPosition関数を修正
-  const estimateDoorPosition = (calibrationPoints: CalibrationPoint[]) => {
-    console.log('=== ドア位置推定開始 ===');
-    console.log('キャリブレーションポイント:', calibrationPoints.map(p => ({ id: p.id, label: p.label, position: p.position })));
-    
-    const doorInsidePoint = calibrationPoints.find(p => p.id === 'door_inside');
-    const doorOutsidePoint = calibrationPoints.find(p => p.id === 'door_outside');
-    
-    console.log('ドア内側ポイント:', doorInsidePoint);
-    console.log('ドア外側ポイント:', doorOutsidePoint);
-    
-    if (!doorInsidePoint || !doorOutsidePoint) {
-      console.log('❌ ドア測定ポイントが見つかりません');
-      return null;
-    }
-
-    if (!doorInsidePoint.measurements.length || !doorOutsidePoint.measurements.length) {
-      console.log('❌ ドア測定データが不足しています');
-      return null;
-    }
-
-    const insideMeasurement = doorInsidePoint.measurements[0];
-    const outsideMeasurement = doorOutsidePoint.measurements[0];
-    
-    console.log('内側測定データ:', insideMeasurement);
-    console.log('外側測定データ:', outsideMeasurement);
-
-    // 既に正規化座標なので、直接使用
-    const insidePos = doorInsidePoint.position;  // { x: 0.5, y: 0.0 }
-    const outsidePos = doorOutsidePoint.position; // { x: 0.5, y: -0.125 }
-    
-    console.log('正規化座標:', { inside: insidePos, outside: outsidePos });
-
-    // 1. 内側と外側の中点を計算
-    const midpointX = (insidePos.x + outsidePos.x) / 2;
-    const midpointY = (insidePos.y + outsidePos.y) / 2;
-    
-    console.log('中点座標:', { x: midpointX, y: midpointY });
-
-    // 2. 内側から外側への方向ベクトルを計算
-    const directionVector = {
-      x: outsidePos.x - insidePos.x,
-      y: outsidePos.y - insidePos.y
-    };
-    
-    console.log('方向ベクトル (内側→外側):', directionVector);
-
-    // 3. ベクトルの長さを計算
-    const vectorLength = Math.sqrt(directionVector.x ** 2 + directionVector.y ** 2);
-    
-    // 4. 単位ベクトルに正規化
-    const unitVector = {
-      x: vectorLength > 0 ? directionVector.x / vectorLength : 0,
-      y: vectorLength > 0 ? directionVector.y / vectorLength : 1 // デフォルトは下向き
-    };
-    
-    console.log('単位ベクトル:', unitVector);
-
-    // 5. 垂直ベクトルを計算（時計回りに90度回転）
-    const perpendicularVector = {
-      x: unitVector.y,  // 90度回転: (x, y) → (y, -x)
-      y: -unitVector.x
-    };
-    
-    console.log('垂直ベクトル:', perpendicularVector);
-
-    // 6. ドアの配置位置を決定
-    // 中点から部屋の境界方向に少し移動してドアを配置
-    const doorOffsetDistance = 0.05; // ドアを境界に近づける距離
-    
-    let doorPosition = {
-      x: midpointX,
-      y: midpointY
-    };
-
-    // 7. どの壁に近いかを判定して、適切な位置に調整
-    const wallDistances = {
-      top: Math.abs(midpointY - 0),      // 上の壁との距離
-      bottom: Math.abs(midpointY - 1),   // 下の壁との距離
-      left: Math.abs(midpointX - 0),     // 左の壁との距離
-      right: Math.abs(midpointX - 1)     // 右の壁との距離
-    };
-
-    // 最も近い壁を特定
-    const nearestWall = Object.entries(wallDistances).reduce((closest, [wall, distance]) => {
-      return distance < closest.distance ? { wall, distance } : closest;
-    }, { wall: 'top', distance: Infinity });
-
-    console.log('最も近い壁:', nearestWall);
-
-    // 8. 最も近い壁に向かってドアを移動（アウトライン上に配置）
-    switch (nearestWall.wall) {
-      case 'top':
-        doorPosition.y = 0; // 上の壁に配置
-        break;
-      case 'bottom':
-        doorPosition.y = 1; // 下の壁に配置
-        break;
-      case 'left':
-        doorPosition.x = 0; // 左の壁に配置
-        break;
-      case 'right':
-        doorPosition.x = 1; // 右の壁に配置
-        break;
-    }
-
-    console.log('壁調整後の位置:', doorPosition);
-
-    // 9. 最終的な位置の検証と調整（アウトライン上に配置）
-    const finalPosition = {
-      x: Math.max(0, Math.min(1, doorPosition.x)),
-      y: Math.max(0, Math.min(1, doorPosition.y))
-    };
-
-    console.log('✅ 最終的なドア位置:', finalPosition);
-
-    return {
-      position: finalPosition,
-      orientation: {
-        direction: unitVector,          // 内側→外側の方向
-        perpendicular: perpendicularVector, // ドアの向き（垂直方向）
-        angle: Math.atan2(unitVector.y, unitVector.x) * 180 / Math.PI // 角度（度）
-      }
-    };
   };
 
   // drawMap関数を修正
@@ -1079,12 +945,8 @@ export default function Calibration() {
       return distance <= beaconRadius;
     });
 
-    // 家具のクリック判定（矩形）- ドアは選択不可
+    // 家具のクリック判定（矩形）
     const clickedFurniture = furniture.find(item => {
-      // 自動配置されたドアは選択不可
-      if (item.type === 'door' && item.id.startsWith('auto-door-')) {
-        return false;
-      }
       return x >= item.position.x && 
             x <= item.position.x + item.width &&
             y >= item.position.y && 
@@ -1176,11 +1038,10 @@ export default function Calibration() {
       return;
     }
 
-    // 家具のドラッグ処理（自動配置されたドアは移動不可）
+    // 家具のドラッグ処理
     if (selectedFurniture && isDragging && !isResizing) {
       const selectedItem = furniture.find(f => f.id === selectedFurniture);
-      // 自動配置されたドアは移動不可
-      if (selectedItem && !(selectedItem.type === 'door' && selectedItem.id.startsWith('auto-door-'))) {
+      if (selectedItem) {
         const x = Math.max(0, Math.min(1 - selectedItem.width, mouseX - selectedItem.width / 2));
         const y = Math.max(0, Math.min(1 - selectedItem.height, mouseY - selectedItem.height / 2));
 
@@ -1193,12 +1054,10 @@ export default function Calibration() {
       return;
     }
 
-    // リサイズ処理（自動配置されたドアはリサイズ不可）
+    // リサイズ処理
     if (selectedFurniture && isResizing && resizeHandle && originalSize) {
       const selectedItem = furniture.find(f => f.id === selectedFurniture);
       if (!selectedItem) return;
-      // 自動配置されたドアはリサイズ不可
-      if (selectedItem.type === 'door' && selectedItem.id.startsWith('auto-door-')) return;
 
       let newWidth = selectedItem.width;
       let newHeight = selectedItem.height;
@@ -1243,10 +1102,7 @@ export default function Calibration() {
       canvas.style.cursor = isDragging ? 'grabbing' : 'move';
     } else if (selectedFurniture) {
       const selectedItem = furniture.find(f => f.id === selectedFurniture);
-      // 自動配置されたドアの場合はカーソル変更しない
-      if (selectedItem && selectedItem.type === 'door' && selectedItem.id.startsWith('auto-door-')) {
-        canvas.style.cursor = 'default';
-      } else if (selectedItem && !isDragging && !isResizing) {
+      if (selectedItem && !isDragging && !isResizing) {
         const handle = getResizeHandle(e, selectedItem);
         if (handle) {
           const cursors = { 
@@ -1427,53 +1283,9 @@ export default function Calibration() {
     if (step < CALIBRATION_STEPS.length) {
       setStep(step + 1);
     } else {
-      // キャリブレーション完了 - ドア位置を自動推定
-      console.log('🎉 キャリブレーション完了 - ドア位置推定中...');
-      
-      const doorEstimationResult = estimateDoorPosition(updatedCalibrationPoints);
-      
-      if (doorEstimationResult) {
-        console.log('✅ ドア位置推定成功:', doorEstimationResult);
-        
-        // 家具タイプを取得
-        const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
-        const doorType = furnitureTypes.door;
-        
-        // ドアの向きに応じてサイズを調整するかどうかの判定
-        const orientation = doorEstimationResult.orientation;
-        const isVerticalMovement = Math.abs(orientation.direction.y) > Math.abs(orientation.direction.x);
-        
-        // ドアのサイズ：元のサイズをそのまま使用（向きによる調整なし）
-        const doorWidth = doorType.width;   // 元のwidth（0.2/roomWidth）をそのまま使用
-        const doorHeight = doorType.height; // 元のheight（0.05/roomHeight）をそのまま使用
-
-        const autoDoor: FurnitureItem = {
-          id: `auto-door-${Date.now()}`,
-          type: 'door',
-          position: doorEstimationResult.position,
-          width: doorWidth,
-          height: doorHeight
-        };
-        
-        console.log('🚪 ドア配置詳細:', {
-          position: doorEstimationResult.position,
-          orientation: orientation,
-          isVerticalMovement,
-          originalDoorType: doorType,
-          finalSize: { width: doorWidth, height: doorHeight },
-          angle: orientation.angle
-        });
-        
-        setFurniture(prev => [...prev, autoDoor]);
-        setSelectedFurniture(autoDoor.id); // 自動配置したドアを選択状態にする
-        
-        console.log('✅ ドアを自動配置しました:', autoDoor);
-        
-      } else {
-        console.log('❌ ドア位置の推定に失敗しました');
-        alert('🎉 キャリブレーションが完了しました！\n\n⚠️ ドア位置の自動推定に失敗しました。\n🔧 手動でドアを配置してください。');
-      }
-      
+      // キャリブレーション完了
+      console.log('🎉 キャリブレーション完了');
+      alert('🎉 キャリブレーションが完了しました！\n\n次のステップで家具を配置してください。');
       setShowFurniture(true);
     }
   };
@@ -1874,11 +1686,11 @@ export default function Calibration() {
   if (showFurniture || isFurnitureEditMode) {
     return (
       <div className="container">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '32px', fontWeight: '700' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+          <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
             {isFurnitureEditMode ? `家具配置の編集: ${roomName}` : isEditMode ? '家具配置の編集' : '家具とオブジェクトの配置'}
           </h1>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={saveCalibration}>
               {isEditMode || isFurnitureEditMode ? '更新' : '保存'}
             </button>
@@ -1907,9 +1719,9 @@ export default function Calibration() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '24px' }}>
+        <div style={{ display: 'flex', gap: '24px', flexDirection: window.innerWidth <= 768 ? 'column' : 'row' }}>
           {/* 左側: コントロールパネル */}
-          <div style={{ width: '300px' }}>
+          <div style={{ width: window.innerWidth <= 768 ? '100%' : '300px' }}>
             {(isEditMode || isFurnitureEditMode) && (
               <div className="card" style={{ marginBottom: '16px', backgroundColor: '#FFF3CD', border: '1px solid #FFEAA7' }}>
                 <h3 style={{ marginBottom: '12px', color: '#856404' }}>編集モード</h3>
@@ -1962,7 +1774,6 @@ export default function Calibration() {
               <h3 style={{ marginBottom: '16px' }}>家具を追加</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {Object.entries(getFurnitureTypes(currentRoomSize.width, currentRoomSize.height))
-                  .filter(([type]) => type !== 'door') // ドアは自動配置のため除外
                   .map(([type, info]) => (
                     <button
                       key={type}
@@ -1984,6 +1795,11 @@ export default function Calibration() {
                 <div>
                   {furniture.map(item => {
                     const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
+                    // doorタイプの家具は表示しない（廃止された機能）
+                    if (item.type === 'door' as any) return null;
+                    const furnitureType = furnitureTypes[item.type];
+                    if (!furnitureType) return null;
+                    
                     return (
                     <div
                       key={item.id}
@@ -2000,7 +1816,7 @@ export default function Calibration() {
                       onClick={() => setSelectedFurniture(selectedFurniture === item.id ? null : item.id)}
                     >
                       <span style={{ fontSize: '14px' }}>
-                        {getFurnitureTypes(currentRoomSize.width, currentRoomSize.height)[item.type as FurnitureType].label}
+                        {furnitureType.label}
                       </span>
                       <button
                         className="btn btn-danger"
@@ -2104,7 +1920,7 @@ export default function Calibration() {
                 選択中: {(() => {
                   const selectedItem = furniture.find(f => f.id === selectedFurniture);
                   const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
-                  const furnitureType = selectedItem ? furnitureTypes[selectedItem.type as FurnitureType] : null;
+                  const furnitureType = selectedItem ? furnitureTypes[selectedItem.type] : null;
                   return furnitureType ? furnitureType.label : '不明';
                 })()}
                 （ドラッグして移動、角をドラッグでサイズ変更）

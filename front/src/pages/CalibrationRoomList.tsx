@@ -105,8 +105,8 @@ export default function CalibrationRoomList() {
   // ルームが0の場合はリダイレクトされるのでここには来ない
   return (
     <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: '700' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
           キャリブレーション
         </h1>
         <button 
@@ -123,7 +123,7 @@ export default function CalibrationRoomList() {
           機能1（室内測位）で有効化するルームを選択してください。
         </p>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-container">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>

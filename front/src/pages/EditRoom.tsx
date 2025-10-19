@@ -204,7 +204,7 @@ export default function EditRoom() {
             className="btn btn-primary"
             onClick={() => navigate(`/add-calibration-point/${roomId}`)}
           >
-            ＋ キャリブレーション点を追加
+            ＋ 編集
           </button>
         </div>
 
