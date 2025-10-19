@@ -368,17 +368,17 @@ export default function AddCalibrationPoint() {
 
     listenerRef.current = listener;
 
-    // 65秒後にタイムアウト
+    // 5分後にタイムアウト
     const timeout = setTimeout(() => {
-      if (isScanning) {
-        console.log('⏱️ 測定がタイムアウト');
-        setIsScanning(false);
-        off(trackerRef);
+      console.log('⏱️ 測定がタイムアウト');
+      setIsScanning(false);
+      if (trackerRefRef.current) {
+        off(trackerRefRef.current);
         trackerRefRef.current = null;
-        listenerRef.current = null;
-        alert('測定がタイムアウトしました。トラッカーがデータを送信するまで最大1分かかります。もう一度試してください。');
       }
-    }, 65000);
+      listenerRef.current = null;
+      alert('測定がタイムアウトしました。\n5分以内にトラッカーからデータが送信されませんでした。\n測定を中断します。');
+    }, 300000);
 
     timeoutRef.current = timeout;
   };

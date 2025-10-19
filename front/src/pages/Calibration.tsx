@@ -1221,17 +1221,17 @@ export default function Calibration() {
 
     listenerRef.current = listener;
 
-    // 60秒後にタイムアウト（トラッカーは1分間隔で送信するため）
+    // 5分後にタイムアウト
     const timeout = setTimeout(() => {
-      if (isScanning) {
-        console.log('⏱️ 測定がタイムアウト');
-        setIsScanning(false);
-        off(trackerRef);
+      console.log('⏱️ 測定がタイムアウト');
+      setIsScanning(false);
+      if (trackerRefRef.current) {
+        off(trackerRefRef.current);
         trackerRefRef.current = null;
-        listenerRef.current = null;
-        alert('測定がタイムアウトしました。トラッカーがデータを送信するまで最大1分かかります。もう一度試してください。');
       }
-    }, 65000);
+      listenerRef.current = null;
+      alert('測定がタイムアウトしました。\n5分以内にトラッカーからデータが送信されませんでした。\n測定を中断します。');
+    }, 300000);
 
     timeoutRef.current = timeout;
   };

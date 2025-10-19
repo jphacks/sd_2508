@@ -302,6 +302,10 @@ export default function Mode1Indoor() {
     if (roomProfile.furniture && roomProfile.furniture.length > 0) {
       console.log('Drawing furniture:', roomProfile.furniture.length);
       roomProfile.furniture.forEach(furniture => {
+        if (furniture.type === 'door') {
+          // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
+          return;
+        }
         const furnitureType = FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
         const furnitureColor = furnitureType?.color || '#95a5a6';
         
