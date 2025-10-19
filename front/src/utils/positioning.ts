@@ -1,5 +1,16 @@
 import { CalibrationPoint } from '../types';
 
+//テスト用家具データ
+export const FURNITURE_TYPES = {
+  desk: { label: '机', width: 2, height: 1, color: '#8B4513' },
+  tv: { label: 'テレビ', width: 3, height: 0.5, color: '#2C3E50' },
+  piano: { label: 'ピアノ', width: 2, height: 1.5, color: '#1A1A1A' },
+  chair: { label: '椅子', width: 0.8, height: 0.8, color: '#CD853F' },
+  door: { label: 'ドア', width: 1, height: 0.2, color: '#D2691E' }
+} as const;
+
+export type FurnitureType = keyof typeof FURNITURE_TYPES;
+
 /**
  * RSSI値から距離を推定（対数距離減衰モデル）
  * @param rssi 受信信号強度

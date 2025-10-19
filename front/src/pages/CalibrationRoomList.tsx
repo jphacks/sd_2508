@@ -69,7 +69,6 @@ export default function CalibrationRoomList() {
       }, { merge: true });
       
       setActiveRoomId(roomId);
-      alert('アクティブなルームを設定しました');
     } catch (error) {
       console.error('アクティブルーム設定エラー:', error);
       alert('アクティブルームの設定に失敗しました');
@@ -106,8 +105,8 @@ export default function CalibrationRoomList() {
   // ルームが0の場合はリダイレクトされるのでここには来ない
   return (
     <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: '700' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
           キャリブレーション
         </h1>
         <button 
@@ -119,12 +118,12 @@ export default function CalibrationRoomList() {
       </div>
 
       <div className="card">
-        <h2 style={{ marginBottom: '16px' }}>キャリブレーション済みルーム一覧</h2>
+        <h2 style={{ marginBottom: '16px' }}>キャリブレーション済みルーム</h2>
         <p style={{ marginBottom: '16px', color: '#7f8c8d' }}>
-          機能1（室内測位）で使用するルームを選択してください。
+          機能1（室内測位）で有効化するルームを選択してください。
         </p>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-container">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #e1e8ed', textAlign: 'left' }}>
@@ -196,16 +195,14 @@ export default function CalibrationRoomList() {
                     <td style={{ padding: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {!isActive && (
                         <button
-                          className="btn btn-primary"
-                          style={{ padding: '6px 9px', fontSize: '10px' }}
+                          className="btn btn-primary btn-compact"
                           onClick={() => setActiveRoom(room.id)}
                         >
-                          使用する
+                          有効化
                         </button>
                       )}
                       <button
-                        className="btn btn-outline"
-                        style={{ padding: '6px 12px', fontSize: '14px' }}
+                        className="btn btn-outline btn-compact"
                         onClick={() => navigate(`/edit-room/${room.id}`)}
                       >
                         編集
@@ -218,8 +215,7 @@ export default function CalibrationRoomList() {
                         家具編集
                       </button> */}
                       <button
-                        className="btn btn-danger"
-                        style={{ padding: '6px 9px', fontSize: '10px' }}
+                        className="btn btn-danger btn-compact"
                         onClick={() => deleteRoom(room.id)}
                       >
                         削除
@@ -234,12 +230,11 @@ export default function CalibrationRoomList() {
       </div>
 
       <div className="card" style={{ marginTop: '24px' }}>
-        <h3 style={{ marginBottom: '16px' }}>💡 使い方のヒント</h3>
+        <h3 style={{ marginBottom: '16px' }}>💡 使い方</h3>
         <ul style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
           <li><strong>新規ルーム作成:</strong> 新しい部屋のキャリブレーションを行う場合は「新規ルーム作成」ボタンをクリック</li>
           <li><strong>使用する:</strong> このルームを機能1（室内測位）で使用する場合に選択</li>
           <li><strong>編集:</strong> 既存のルームの部屋サイズを変更したり、キャリブレーション点を追加して精度を向上</li>
-          <li><strong>削除:</strong> 不要になったルームを削除（復元できないのでご注意ください）</li>
         </ul>
       </div>
     </div>

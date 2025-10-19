@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { collection, getDocs, addDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
@@ -6,38 +6,112 @@ import { db, rtdb } from '../firebase';
 import { Device, Beacon, CalibrationPoint, RoomProfile, FurnitureItem } from '../types';
 
 
-const CALIBRATION_STEPS = [
+// 基本的なキャリブレーションステップ（ドア位置選択まで）
+const BASE_CALIBRATION_STEPS = [
   { id: 'corner1', label: '左上隅', position: { x: 0, y: 0 } },
-  { id: 'corner2', label: '右上隅', position: { x: 10, y: 0 } },
-  { id: 'corner3', label: '右下隅', position: { x: 10, y: 8 } },
-  { id: 'corner4', label: '左下隅', position: { x: 0, y: 8 } },
-  { id: 'center', label: '部屋の中央', position: { x: 5, y: 4 } },
-  { id: 'door_inside', label: 'ドア内側', position: { x: 5, y: 0 } },
-  { id: 'door_outside', label: 'ドア外側', position: { x: 5, y: -1 } }
+  { id: 'corner2', label: '右上隅', position: { x: 1.0, y: 0 } },
+  { id: 'corner3', label: '右下隅', position: { x: 1.0, y: 1.0 } },
+  { id: 'corner4', label: '左下隅', position: { x: 0, y: 1.0 } },
+  { id: 'center', label: '部屋の中央', position: { x: 0.5, y: 0.5 } },
+  { id: 'door_position_select', label: 'ドア位置選択', position: { x: 0.5, y: 0 } } // 仮の位置
 ];
 
-// テスト用ダミーマップデータ
+// ドア位置に基づいて動的に生成される関数
+const generateCalibrationSteps = (doorPosition: { x: number; y: number }) => {
+  // ドアがどの辺にあるかを判定
+  const edges = [
+    { name: 'top', distance: Math.abs(doorPosition.y - 0) },
+    { name: 'bottom', distance: Math.abs(doorPosition.y - 1.0) },
+    { name: 'left', distance: Math.abs(doorPosition.x - 0) },
+    { name: 'right', distance: Math.abs(doorPosition.x - 1.0) }
+  ];
+  
+  const closestEdge = edges.reduce((min, edge) => 
+    edge.distance < min.distance ? edge : min
+  );
+
+  // ドア内側・外側の位置を計算
+  let doorInside = { x: doorPosition.x, y: doorPosition.y };
+  let doorOutside = { x: doorPosition.x, y: doorPosition.y };
+  
+  const offset = 0.05; // オフセット距離
+  
+  switch (closestEdge.name) {
+    case 'top':
+      doorInside = { x: doorPosition.x, y: doorPosition.y + offset };
+      doorOutside = { x: doorPosition.x, y: doorPosition.y - offset };
+      break;
+    case 'bottom':
+      doorInside = { x: doorPosition.x, y: doorPosition.y - offset };
+      doorOutside = { x: doorPosition.x, y: doorPosition.y + offset };
+      break;
+    case 'left':
+      doorInside = { x: doorPosition.x + offset, y: doorPosition.y };
+      doorOutside = { x: doorPosition.x - offset, y: doorPosition.y };
+      break;
+    case 'right':
+      doorInside = { x: doorPosition.x - offset, y: doorPosition.y };
+      doorOutside = { x: doorPosition.x + offset, y: doorPosition.y };
+      break;
+  }
+
+  return [
+    ...BASE_CALIBRATION_STEPS,
+    { id: 'door_inside', label: 'ドア内側', position: doorInside },
+    { id: 'door_outside', label: 'ドア外側', position: doorOutside }
+  ];
+};
+
 const TEST_ROOM = {
-  width: 10,
-  height: 8,
+  width: 1,
+  height: 1,
   name: 'テスト会議室',
   beacons: [
-    { id: 'beacon1', position: { x: 1, y: 1 }, name: 'ビーコン1' },
-    { id: 'beacon2', position: { x: 9, y: 1 }, name: 'ビーコン2' },
-    { id: 'beacon3', position: { x: 5, y: 7 }, name: 'ビーコン3' }
+    { id: 'beacon1', position: { x: 0.1, y: 0.1 }, name: 'ビーコン1' },
+    { id: 'beacon2', position: { x: 0.9, y: 0.1 }, name: 'ビーコン2' },
+    { id: 'beacon3', position: { x: 0.5, y: 0.9 }, name: 'ビーコン3' }
   ]
 };
 
-// テスト用家具タイプ定義
-const FURNITURE_TYPES = {
-  desk: { label: '机', width: 2, height: 1, color: '#8B4513' },
-  tv: { label: 'テレビ', width: 3, height: 0.5, color: '#2C3E50' },
-  piano: { label: 'ピアノ', width: 2, height: 1.5, color: '#1A1A1A' },
-  chair: { label: '椅子', width: 0.8, height: 0.8, color: '#CD853F' },
-  door: { label: 'ドア', width: 1, height: 0.2, color: '#D2691E' }
-} as const;
+const getFurnitureTypes = (roomWidth: number, roomHeight: number) => {
+  // 基準サイズ（メートル）
+  const baseSizes = {
+    desk: { width: 0.3, height: 0.2 },
+    tv: { width: 0.3, height: 0.05 },
+    piano: { width: 0.2, height: 0.15 },
+    chair: { width: 0.05, height: 0.05 }
+  };
 
-type FurnitureType = keyof typeof FURNITURE_TYPES;
+  // 正規化座標に変換
+  return {
+    desk: { 
+      label: '机', 
+      width: baseSizes.desk.width / roomWidth, 
+      height: baseSizes.desk.height / roomHeight, 
+      color: '#8B4513' 
+    },
+    tv: { 
+      label: 'テレビ', 
+      width: baseSizes.tv.width / roomWidth, 
+      height: baseSizes.tv.height / roomHeight, 
+      color: '#2C3E50' 
+    },
+    piano: { 
+      label: 'ピアノ', 
+      width: baseSizes.piano.width / roomWidth, 
+      height: baseSizes.piano.height / roomHeight, 
+      color: '#1A1A1A' 
+    },
+    chair: { 
+      label: '椅子', 
+      width: baseSizes.chair.width / roomWidth, 
+      height: baseSizes.chair.height / roomHeight, 
+      color: '#CD853F' 
+    }
+  } as const;
+};
+
+export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair';
 
 
 export default function Calibration() {
@@ -57,6 +131,15 @@ export default function Calibration() {
   const [showFurniture, setShowFurniture] = useState(false);
   const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // ドア位置選択用のステート
+  const [doorPosition, setDoorPosition] = useState<{ x: number; y: number }>({ x: 0.5, y: 0 });
+  const [isDraggingDoor, setIsDraggingDoor] = useState(false);
+  
+  // 動的に生成されるキャリブレーションステップ
+  const CALIBRATION_STEPS = useMemo(() => {
+    return generateCalibrationSteps(doorPosition);
+  }, [doorPosition]);
 
   const [selectedFurniture, setSelectedFurniture] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -64,6 +147,10 @@ export default function Calibration() {
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<'se' | 'sw' | 'ne' | 'nw' | null>(null);
   const [originalSize, setOriginalSize] = useState<{width: number, height: number} | null>(null);
+
+  const [selectedBeacon, setSelectedBeacon] = useState<string | null>(null);
+  const [beaconPositions, setBeaconPositions] = useState<{ [id: string]: { x: number; y: number } }>({});
+  
   
   // 部屋サイズの入力（オプショナル）
   const [roomWidth, setRoomWidth] = useState<string>('');
@@ -81,11 +168,11 @@ export default function Calibration() {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
 
+  const [currentRoomSize, setCurrentRoomSize] = useState({ width: 1, height: 1 });
+
+
   useEffect(() => {
-    console.log('useEffect triggered');
-    console.log('Furniture count:', furniture.length);
-    console.log('Selected furniture:', selectedFurniture);
-    
+    // データ読み込み処理
     if (devices.length === 0) {
       loadDevices();
     }
@@ -93,16 +180,40 @@ export default function Calibration() {
       loadBeacons();
     }
 
-    // 編集モードの場合、既存のルームデータを読み込み（一度だけ）
+    // 編集モードのデータ読み込み
     if ((mode === 'furniture' && roomId) || isFurnitureEditMode) {
       if (!originalRoomData) {
         loadRoomData(roomId!);
-        return; // データ読み込み中は描画しない
       }
     }
 
+    // マップを描画
     drawMap();
-  }, [furniture, selectedFurniture, originalRoomData]);
+  }, [
+    furniture.length,
+    selectedFurniture, 
+    selectedBeacon,
+    Object.keys(beaconPositions).length,
+    originalRoomData,
+    currentRoomSize.width,
+    currentRoomSize.height,
+    showFurniture,
+    step,
+    calibrationPoints.length,
+    doorPosition.x, // ←追加
+    doorPosition.y, // ←追加
+    isDraggingDoor // ←追加
+  ]);
+
+  useEffect(() => {
+    const width = roomWidth ? parseFloat(roomWidth) : 1;
+    const height = roomHeight ? parseFloat(roomHeight) : 1;
+    
+    // 有効な数値の場合のみ更新
+    if (!isNaN(width) && !isNaN(height) && width > 0 && height > 0) {
+      setCurrentRoomSize({ width, height });
+    }
+  }, [roomWidth, roomHeight]);
 
   const loadDevices = async () => {
     const snapshot = await getDocs(collection(db, 'devices'));
@@ -112,6 +223,8 @@ export default function Calibration() {
     } as Device & { id: string }));
     setDevices(data);
   };
+
+  // const [currentRoomSize, setCurrentRoomSize] = useState({ width: 1, height: 1 });
 
   const loadRoomData = async (roomId: string) => {
     try {
@@ -126,10 +239,27 @@ export default function Calibration() {
         setIsEditMode(true);
         setShowFurniture(true);
         
-        // TEST_ROOMのサイズを実際のルームサイズに更新
+        // TEST_ROOMを変更する代わりに、状態として管理
         if (roomData.outline) {
-          TEST_ROOM.width = roomData.outline.width;
-          TEST_ROOM.height = roomData.outline.height;
+          setCurrentRoomSize({
+            width: roomData.outline.width,
+            height: roomData.outline.height
+          });
+        }
+
+        // beaconPositionsが配列形式で保存されている場合はオブジェクト形式に変換
+        if (roomData.beaconPositions) {
+          if (Array.isArray(roomData.beaconPositions)) {
+            // 配列形式の場合
+            const positionsObject: { [id: string]: { x: number; y: number } } = {};
+            roomData.beaconPositions.forEach((beacon: any) => {
+              positionsObject[beacon.id] = beacon.position;
+            });
+            setBeaconPositions(positionsObject);
+          } else {
+            // オブジェクト形式の場合（後方互換性）
+            setBeaconPositions(roomData.beaconPositions as any);
+          }
         }
       } else {
         alert('ルームが見つかりません');
@@ -148,14 +278,41 @@ export default function Calibration() {
       const raw = doc.data() as Beacon;
       return {
         ...raw,
-        rssiAt1m: raw.rssiAt1m ?? -59,
-        firestoreId: doc.id // Firestoreの自動生成IDを別プロパティとして保持
+        rssiAt1m: raw.rssiAt1m ?? -59, // 👈 ここで既にデフォルト値が設定されている
+        firestoreId: doc.id
       } as Beacon & { firestoreId: string };
     });
     setBeacons(data);
   };
 
-  //(追加)マップ描写関数
+  // ドア位置を部屋の外枠上にスナップする関数
+  const snapDoorToEdge = (x: number, y: number): { x: number; y: number } => {
+    // 各辺までの距離を計算
+    const distanceToTop = Math.abs(y - 0);
+    const distanceToBottom = Math.abs(y - 1.0);
+    const distanceToLeft = Math.abs(x - 0);
+    const distanceToRight = Math.abs(x - 1.0);
+    
+    // 最も近い辺を見つける
+    const minDistance = Math.min(distanceToTop, distanceToBottom, distanceToLeft, distanceToRight);
+    
+    // 最も近い辺にスナップ
+    if (minDistance === distanceToTop) {
+      // 上の辺
+      return { x: Math.max(0, Math.min(1.0, x)), y: 0 };
+    } else if (minDistance === distanceToBottom) {
+      // 下の辺
+      return { x: Math.max(0, Math.min(1.0, x)), y: 1.0 };
+    } else if (minDistance === distanceToLeft) {
+      // 左の辺
+      return { x: 0, y: Math.max(0, Math.min(1.0, y)) };
+    } else {
+      // 右の辺
+      return { x: 1.0, y: Math.max(0, Math.min(1.0, y)) };
+    }
+  };
+
+  // drawMap関数を修正
   const drawMap = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -163,109 +320,472 @@ export default function Calibration() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const scale = 40; // 1メートル = 40ピクセル
-    canvas.width = TEST_ROOM.width * scale;
-    canvas.height = TEST_ROOM.height * scale;
+    // キャリブレーション時は部屋外も含めてマージンを追加
+    const margin = showFurniture ? 0 : 0.15; // キャリブレーション時は15%のマージン（ドア外側対応）
+    const maxSize = showFurniture ? 700 : 500; // キャリブレーション時は500px
+    
+    // マージンを考慮したアスペクト比計算
+    const effectiveWidth = currentRoomSize.width + (margin * 2);
+    const effectiveHeight = currentRoomSize.height + (margin * 2);
+    const aspectRatio = effectiveWidth / effectiveHeight;
+    
+    let canvasWidth, canvasHeight;
+
+    if (aspectRatio >= 1) {
+      canvasWidth = maxSize;
+      canvasHeight = maxSize / aspectRatio;
+    } else {
+      canvasWidth = maxSize * aspectRatio;
+      canvasHeight = maxSize;
+    }
+
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // 座標変換関数（正規化座標 → キャンバス座標）
+    const normalizedToCanvas = (normalizedX: number, normalizedY: number) => {
+      // マージンを考慮した座標変換
+      const adjustedX = (normalizedX + margin / currentRoomSize.width) / (1 + 2 * margin / currentRoomSize.width);
+      const adjustedY = (normalizedY + margin / currentRoomSize.height) / (1 + 2 * margin / currentRoomSize.height);
+      
+      return {
+        x: adjustedX * canvas.width,
+        y: adjustedY * canvas.height
+      };
+    };
 
     // 背景をクリア
     ctx.fillStyle = '#F8F9FA';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 部屋の輪郭を描画
-    ctx.strokeStyle = '#2C3E50';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    // キャリブレーション時は拡張エリアを表示
+    if (!showFurniture) {
+      // 拡張エリア（薄いグレー）
+      ctx.fillStyle = '#FAFAFA';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // 実際の部屋エリア（白）
+      const roomStart = normalizedToCanvas(0, 0);
+      const roomEnd = normalizedToCanvas(1, 1);
+      const roomWidth = roomEnd.x - roomStart.x;
+      const roomHeight = roomEnd.y - roomStart.y;
+      
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(roomStart.x, roomStart.y, roomWidth, roomHeight);
+      
+      // 部屋の境界を強調
+      ctx.strokeStyle = '#2C3E50';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(roomStart.x, roomStart.y, roomWidth, roomHeight);
+      
+      // 部屋外エリアのラベル
+      ctx.fillStyle = '#7f8c8d';
+      ctx.font = '14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('部屋外エリア', canvas.width / 2, 20);
+    } else {
+      // 家具配置時は通常の描画
+      ctx.strokeStyle = '#2C3E50';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    }
 
-    // グリッドを描画
+    // グリッドを描画（拡張範囲に対応）
     ctx.strokeStyle = '#E1E8ED';
     ctx.lineWidth = 1;
-    for (let x = 0; x <= TEST_ROOM.width; x++) {
+    
+    // グリッド分割数を計算
+    const gridStepsX = Math.max(10, Math.ceil(effectiveWidth * 10));
+    const gridStepsY = Math.max(10, Math.ceil(effectiveHeight * 10));
+
+    // 縦線
+    for (let x = 0; x <= gridStepsX; x++) {
+      const xPos = (x / gridStepsX) * canvas.width;
       ctx.beginPath();
-      ctx.moveTo(x * scale, 0);
-      ctx.lineTo(x * scale, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = 0; y <= TEST_ROOM.height; y++) {
-      ctx.beginPath();
-      ctx.moveTo(0, y * scale);
-      ctx.lineTo(canvas.width, y * scale);
+      ctx.moveTo(xPos, 0);
+      ctx.lineTo(xPos, canvas.height);
       ctx.stroke();
     }
 
-    // ビーコンを描画
+    // 横線
+    for (let y = 0; y <= gridStepsY; y++) {
+      const yPos = (y / gridStepsY) * canvas.height;
+      ctx.beginPath();
+      ctx.moveTo(0, yPos);
+      ctx.lineTo(canvas.width, yPos);
+      ctx.stroke();
+    }
+
+    // 家具を描画（座標変換適用）
+    const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
+    
+    furniture.forEach(item => {
+      const furnitureType = furnitureTypes[item.type as FurnitureType];
+      if (!furnitureType) return;
+
+      const startPos = showFurniture 
+        ? { x: item.position.x * canvas.width, y: item.position.y * canvas.height }
+        : normalizedToCanvas(item.position.x, item.position.y);
+      
+      const width = showFurniture 
+        ? item.width * canvas.width 
+        : (item.width / (1 + 2 * margin / currentRoomSize.width)) * canvas.width;
+      
+      const height = showFurniture 
+        ? item.height * canvas.height 
+        : (item.height / (1 + 2 * margin / currentRoomSize.height)) * canvas.height;
+
+      // 選択状態の表示
+      if (selectedFurniture === item.id) {
+        ctx.strokeStyle = '#E74C3C';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(startPos.x - 2, startPos.y - 2, width + 4, height + 4);
+
+        // リサイズハンドルを描画
+        const handleSize = 8;
+        const handles = [
+          { x: startPos.x + width - handleSize/2, y: startPos.y + height - handleSize/2, type: 'se' },
+          { x: startPos.x - handleSize/2, y: startPos.y + height - handleSize/2, type: 'sw' },
+          { x: startPos.x + width - handleSize/2, y: startPos.y - handleSize/2, type: 'ne' },
+          { x: startPos.x - handleSize/2, y: startPos.y - handleSize/2, type: 'nw' }
+        ];
+
+        ctx.fillStyle = '#E74C3C';
+        handles.forEach(handle => {
+          ctx.fillRect(handle.x, handle.y, handleSize, handleSize);
+        });
+      }
+
+      // 家具本体
+      ctx.fillStyle = furnitureType.color;
+      ctx.fillRect(startPos.x, startPos.y, width, height);
+
+      // ラベル
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 10px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(furnitureType.label, startPos.x + width / 2, startPos.y + height / 2 + 3);
+    });
+
+    // ビーコンを描画（座標変換適用）
     TEST_ROOM.beacons.forEach(beacon => {
+      const position = beaconPositions[beacon.id] || beacon.position;
+      
+      const beaconPos = showFurniture 
+        ? { x: position.x * canvas.width, y: position.y * canvas.height }
+        : normalizedToCanvas(position.x, position.y);
+
+      // 選択状態の表示（ビーコン）
+      if (selectedBeacon === beacon.id) {
+        ctx.strokeStyle = '#E74C3C';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(beaconPos.x, beaconPos.y, 12, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+
+      // ビーコン本体（影付き）
+      ctx.beginPath();
+      ctx.arc(beaconPos.x + 2, beaconPos.y + 2, 8, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.fill();
+
       ctx.fillStyle = '#4A90E2';
       ctx.beginPath();
-      ctx.arc(beacon.position.x * scale, beacon.position.y * scale, 8, 0, 2 * Math.PI);
+      ctx.arc(beaconPos.x, beaconPos.y, 8, 0, 2 * Math.PI);
       ctx.fill();
       
-      ctx.fillStyle = '#2C3E50';
+      // ビーコン境界線
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(beaconPos.x, beaconPos.y, 8, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // ビーコン内部
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(beaconPos.x, beaconPos.y, 4, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // ビーコン名（背景付き）
       ctx.font = '12px Arial';
-      ctx.fillText(beacon.name, beacon.position.x * scale + 12, beacon.position.y * scale + 4);
+      ctx.textAlign = 'left';
+      
+      const textMetrics = ctx.measureText(beacon.name);
+      const textWidth = textMetrics.width + 8;
+      const textHeight = 16;
+      
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fillRect(beaconPos.x + 12, beaconPos.y - 8, textWidth, textHeight);
+
+      ctx.strokeStyle = '#2C3E50';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(beaconPos.x + 12, beaconPos.y - 8, textWidth, textHeight);
+
+      ctx.fillStyle = '#2C3E50';
+      ctx.fillText(beacon.name, beaconPos.x + 16, beaconPos.y + 4);
     });
-    // 家具を描画
-    furniture.forEach(item => {
-    const furnitureType = FURNITURE_TYPES[item.type as FurnitureType];
-    if (!furnitureType) return;
 
-    const x = item.position.x * scale;
-    const y = item.position.y * scale;
-    const width = item.width * scale;
-    const height = item.height * scale;
+    // キャリブレーションポイントを描画（座標変換適用）
+    if (!showFurniture) {
+      CALIBRATION_STEPS.forEach((calibrationStep, index) => {
+        // 座標変換を使用
+        const pointPos = normalizedToCanvas(calibrationStep.position.x, calibrationStep.position.y);
+        
+        // キャンバス範囲チェック
+        const isOutside = calibrationStep.position.x < 0 || calibrationStep.position.x > 1 || 
+                        calibrationStep.position.y < 0 || calibrationStep.position.y > 1;
 
-    // 選択状態の表示
-    if (selectedFurniture === item.id) {
-      ctx.strokeStyle = '#E74C3C';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+        // 測定済みかどうかを判定
+        const isCompleted = calibrationPoints.some(point => point.id === calibrationStep.id);
+        const isCurrent = step === index + 1;
+        
+        // 部屋外のポイントは異なる表示スタイル
+        const pointStyle = isOutside ? {
+          backgroundColor: 'rgba(255, 152, 0, 0.3)',
+          borderColor: '#FF9800',
+          labelBg: 'rgba(255, 193, 7, 0.9)'
+        } : {
+          backgroundColor: isCompleted ? 'rgba(76, 175, 80, 0.2)' : isCurrent ? 'rgba(255, 193, 7, 0.3)' : 'rgba(158, 158, 158, 0.2)',
+          borderColor: isCompleted ? '#4CAF50' : isCurrent ? '#FFC107' : '#9E9E9E',
+          labelBg: 'rgba(255, 255, 255, 0.9)'
+        };
 
-      // リサイズハンドルを描画
-      const handleSize = 8;
-      const handles = [
-        { x: x + width - handleSize/2, y: y + height - handleSize/2, type: 'se' }, // 右下
-        { x: x - handleSize/2, y: y + height - handleSize/2, type: 'sw' },         // 左下
-        { x: x + width - handleSize/2, y: y - handleSize/2, type: 'ne' },         // 右上
-        { x: x - handleSize/2, y: y - handleSize/2, type: 'nw' }                  // 左上
-      ];
+        // ポイントの背景円（大きめ）
+        ctx.beginPath();
+        ctx.arc(pointPos.x, pointPos.y, 20, 0, 2 * Math.PI);
+        ctx.fillStyle = pointStyle.backgroundColor;
+        ctx.fill();
 
-      ctx.fillStyle = '#E74C3C';
-      handles.forEach(handle => {
-        ctx.fillRect(handle.x, handle.y, handleSize, handleSize);
+        // ポイントの境界線
+        ctx.beginPath();
+        ctx.arc(pointPos.x, pointPos.y, 20, 0, 2 * Math.PI);
+        ctx.strokeStyle = pointStyle.borderColor;
+        ctx.lineWidth = isCurrent ? 3 : 2;
+        ctx.stroke();
+
+        // 部屋外ポイントの特別な表示
+        if (isOutside) {
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.arc(pointPos.x, pointPos.y, 25, 0, 2 * Math.PI);
+          ctx.strokeStyle = '#FF9800';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        // ポイントの中心
+        ctx.beginPath();
+        ctx.arc(pointPos.x, pointPos.y, 8, 0, 2 * Math.PI);
+        ctx.fillStyle = pointStyle.borderColor;
+        ctx.fill();
+
+        // 完了チェックマーク
+        if (isCompleted) {
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(pointPos.x - 4, pointPos.y);
+          ctx.lineTo(pointPos.x - 1, pointPos.y + 3);
+          ctx.lineTo(pointPos.x + 4, pointPos.y - 2);
+          ctx.stroke();
+        }
+
+        // 現在ステップの矢印
+        if (isCurrent) {
+          ctx.fillStyle = pointStyle.borderColor;
+          ctx.beginPath();
+          ctx.moveTo(pointPos.x, pointPos.y - 4);
+          ctx.lineTo(pointPos.x - 3, pointPos.y + 2);
+          ctx.lineTo(pointPos.x + 3, pointPos.y + 2);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // ポイント番号
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText((index + 1).toString(), pointPos.x, pointPos.y + 4);
+
+        // ラベル表示の位置調整
+        const label = calibrationStep.label;
+        const labelMetrics = ctx.measureText(label);
+        const labelWidth = labelMetrics.width + 12;
+        const labelHeight = 20;
+        
+        let labelX = pointPos.x - labelWidth / 2;
+        let labelY = pointPos.y + 35;
+        
+        // 画面端でのラベル位置調整
+        if (labelX < 0) labelX = 5;
+        if (labelX + labelWidth > canvas.width) labelX = canvas.width - labelWidth - 5;
+        if (labelY + labelHeight > canvas.height) labelY = pointPos.y - 25;
+        if (labelY < 0) labelY = pointPos.y + 35;
+
+        // ラベル背景
+        ctx.fillStyle = pointStyle.labelBg;
+        ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+
+        // ラベル境界線
+        ctx.strokeStyle = pointStyle.borderColor;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(labelX, labelY, labelWidth, labelHeight);
+
+        // ラベルテキスト
+        ctx.fillStyle = isOutside ? '#E65100' : '#2C3E50';
+        ctx.font = isOutside ? 'bold 12px Arial' : '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, labelX + labelWidth / 2, labelY + 14);
+
+        // 座標表示（デバッグ用）
+        const coordText = `(${calibrationStep.position.x.toFixed(2)}, ${calibrationStep.position.y.toFixed(2)})`;
+        ctx.fillStyle = '#7f8c8d';
+        ctx.font = '10px Arial';
+        ctx.fillText(coordText, labelX + labelWidth / 2, labelY + 30);
+
+        // 部屋外ポイントの説明
+        if (isOutside) {
+          ctx.fillStyle = '#FF6F00';
+          ctx.font = '9px Arial';
+          ctx.fillText('(部屋外)', labelX + labelWidth / 2, labelY + 42);
+        }
       });
+      
+      // ドア位置関連の表示
+      const currentStep = CALIBRATION_STEPS[step - 1];
+      
+      // ドア位置選択ステップの場合、ドラッグ可能なドアマーカーを表示
+      if (step > 0 && currentStep?.id === 'door_position_select') {
+        const doorPos = normalizedToCanvas(doorPosition.x, doorPosition.y);
+        
+        // ドアマーカーの描画（大きめの目立つマーカー）
+        // 外側の円（グロー効果）
+        ctx.beginPath();
+        ctx.arc(doorPos.x, doorPos.y, 30, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255, 152, 0, 0.2)';
+        ctx.fill();
+        
+        // メインの円
+        ctx.beginPath();
+        ctx.arc(doorPos.x, doorPos.y, 20, 0, 2 * Math.PI);
+        ctx.fillStyle = isDraggingDoor ? '#FF6F00' : '#FF9800';
+        ctx.fill();
+        
+        // 境界線
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // ドアアイコン（🚪）
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 20px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🚪', doorPos.x, doorPos.y);
+        
+        // ラベル
+        const labelText = 'ドアの位置';
+        const labelMetrics = ctx.measureText(labelText);
+        const labelWidth = labelMetrics.width + 16;
+        const labelHeight = 24;
+        const labelX = doorPos.x - labelWidth / 2;
+        const labelY = doorPos.y + 40;
+        
+        // ラベル背景
+        ctx.fillStyle = 'rgba(255, 152, 0, 0.95)';
+        ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+        
+        // ラベル境界線
+        ctx.strokeStyle = '#FF6F00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(labelX, labelY, labelWidth, labelHeight);
+        
+        // ラベルテキスト
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 14px Arial';
+        ctx.textBaseline = 'top';
+        ctx.fillText(labelText, doorPos.x, labelY + 5);
+        
+        // 座標表示
+        const coordText = `(${doorPosition.x.toFixed(2)}, ${doorPosition.y.toFixed(2)})`;
+        ctx.fillStyle = '#FF9800';
+        ctx.font = '11px Arial';
+        ctx.fillText(coordText, doorPos.x, labelY + labelHeight + 12);
+        
+        // ドラッグ中のヒント
+        if (isDraggingDoor) {
+          ctx.fillStyle = '#FF6F00';
+          ctx.font = 'bold 12px Arial';
+          ctx.fillText('外枠に沿って移動します', doorPos.x, labelY + labelHeight + 28);
+        }
+      }
+      // ドア内側・外側測定ステップの場合、参照用にドア位置を表示（ドラッグ不可）
+      else if (step > 0 && (currentStep?.id === 'door_inside' || currentStep?.id === 'door_outside')) {
+        const doorPos = normalizedToCanvas(doorPosition.x, doorPosition.y);
+        
+        // 参照用のドアマーカー（グレーアウト）
+        ctx.beginPath();
+        ctx.arc(doorPos.x, doorPos.y, 15, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
+        ctx.fill();
+        
+        // 境界線
+        ctx.strokeStyle = '#9E9E9E';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // ドアアイコン（小さめ）
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🚪', doorPos.x, doorPos.y);
+        
+        // ラベル（小さめ）
+        const labelText = 'ドア位置（参照）';
+        const labelMetrics = ctx.measureText(labelText);
+        const labelWidth = labelMetrics.width + 12;
+        const labelHeight = 20;
+        const labelX = doorPos.x - labelWidth / 2;
+        const labelY = doorPos.y + 30;
+        
+        // ラベル背景
+        ctx.fillStyle = 'rgba(158, 158, 158, 0.8)';
+        ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+        
+        // ラベル境界線
+        ctx.strokeStyle = '#9E9E9E';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(labelX, labelY, labelWidth, labelHeight);
+        
+        // ラベルテキスト
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '12px Arial';
+        ctx.textBaseline = 'top';
+        ctx.fillText(labelText, doorPos.x, labelY + 4);
+      }
     }
 
-    // 家具本体
-    ctx.fillStyle = furnitureType.color;
-    ctx.fillRect(x, y, width, height);
-
-    // ラベル
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 10px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(furnitureType.label, x + width / 2, y + height / 2 + 3);
-  });
-
-  ctx.textAlign = 'left';
-};
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+  };
 
   const addFurniture = (type: FurnitureType) => {
-    console.log('addFurniture called with type:', type);
-    const furnitureType = FURNITURE_TYPES[type];
+    const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
+    const furnitureType = furnitureTypes[type];
+    
     const newItem: FurnitureItem = {
       id: `furniture-${Date.now()}`,
       type,
-      position: { x: 2, y: 2 },
+      position: { x: 0.4, y: 0.4 }, // 中央付近に配置
       width: furnitureType.width,
       height: furnitureType.height
     };
     
-    console.log('Adding furniture:', newItem);
-    setFurniture(prev => {
-      const updated = [...prev, newItem];
-      console.log('Updated furniture list:', updated);
-      console.log('Previous furniture list:', prev);
-      return updated;
-    });
+    setFurniture(prev => [...prev, newItem]);
     setSelectedFurniture(newItem.id);
   };
 
@@ -315,12 +835,26 @@ export default function Calibration() {
       }
     }));
 
+    // ビーコン位置を更新されたものに変更
+    const updatedBeacons = TEST_ROOM.beacons.map(beacon => ({
+      id: beacon.id,
+      name: beacon.name,
+      position: beaconPositions[beacon.id] || beacon.position
+    }));
+
+    const beaconPositionsArray = Object.entries(beaconPositions).map(([id, position]) => ({
+      id,
+      name: TEST_ROOM.beacons.find(b => b.id === id)?.name || `ビーコン${id}`,
+      position
+    }));
+
     const roomProfile: Partial<RoomProfile> = {
       name: roomName,
       beacons: selectedBeacons,
       calibrationPoints: calibrationPoints,
       outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
       furniture: furniture,
+      beaconPositions: beaconPositionsArray, // ビーコン位置を保存
       createdAt: originalRoomData?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -329,7 +863,7 @@ export default function Calibration() {
       if (isEditMode && roomId) {
         // 編集モード：既存のドキュメントを更新
         await updateDoc(doc(db, 'rooms', roomId), roomProfile);
-        alert(`「${roomName}」の家具配置が更新されました！`);
+        // alert(`「${roomName}」の家具配置が更新されました！`);
         
         // 家具編集モードの場合は EditRoom に戻る
         if (isFurnitureEditMode) {
@@ -355,7 +889,7 @@ export default function Calibration() {
     if (!canvas) return null;
 
     const rect = canvas.getBoundingClientRect();
-    const scale = 40;
+    const scale = 700;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
@@ -381,69 +915,147 @@ export default function Calibration() {
     return null;
   };
 
+  // handleCanvasClick関数を修正
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const scale = 40;
-    const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top) / scale;
+    let x = (e.clientX - rect.left) / canvas.width;
+    let y = (e.clientY - rect.top) / canvas.height;
 
-    // クリックされた家具を検索
-    const clickedFurniture = furniture.find(item => {
-      return x >= item.position.x && x <= item.position.x + item.width &&
-            y >= item.position.y && y <= item.position.y + item.height;
+    // キャリブレーション時は座標変換を適用
+    if (!showFurniture) {
+      const margin = 0.15;
+      const effectiveWidth = currentRoomSize.width + (margin * 2);
+      const effectiveHeight = currentRoomSize.height + (margin * 2);
+      
+      // キャンバス座標から正規化座標に逆変換
+      x = (x * (1 + 2 * margin / currentRoomSize.width)) - (margin / currentRoomSize.width);
+      y = (y * (1 + 2 * margin / currentRoomSize.height)) - (margin / currentRoomSize.height);
+    }
+
+    // ビーコンのクリック判定（円形）
+    const clickedBeacon = TEST_ROOM.beacons.find(beacon => {
+      const position = beaconPositions[beacon.id] || beacon.position;
+      const distance = Math.sqrt(
+        Math.pow(x - position.x, 2) + Math.pow(y - position.y, 2)
+      );
+      const beaconRadius = 12 / Math.min(canvas.width, canvas.height);
+      return distance <= beaconRadius;
     });
 
-    if (clickedFurniture) {
+    // 家具のクリック判定（矩形）
+    const clickedFurniture = furniture.find(item => {
+      return x >= item.position.x && 
+            x <= item.position.x + item.width &&
+            y >= item.position.y && 
+            y <= item.position.y + item.height;
+    });
+
+    if (clickedBeacon) {
+      setSelectedBeacon(selectedBeacon === clickedBeacon.id ? null : clickedBeacon.id);
+      setSelectedFurniture(null);
+    } else if (clickedFurniture) {
       setSelectedFurniture(selectedFurniture === clickedFurniture.id ? null : clickedFurniture.id);
+      setSelectedBeacon(null);
     } else {
       setSelectedFurniture(null);
+      setSelectedBeacon(null);
     }
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // ドア位置選択ステップの場合
+    const currentStep = CALIBRATION_STEPS[step - 1];
+    
+    if (step > 0 && currentStep?.id === 'door_position_select') {
+      setIsDraggingDoor(true);
+      e.preventDefault();
+      return;
+    }
+    
+    if (selectedBeacon) {
+      setIsDragging(true);
+      e.preventDefault();
+      return;
+    }
+
     if (!selectedFurniture) return;
 
     const selectedItem = furniture.find(f => f.id === selectedFurniture);
     if (!selectedItem) return;
 
-    // リサイズハンドルをチェック
     const handle = getResizeHandle(e, selectedItem);
+    
     if (handle) {
       setIsResizing(true);
       setResizeHandle(handle);
       setOriginalSize({ width: selectedItem.width, height: selectedItem.height });
+      e.preventDefault();
     } else {
       setIsDragging(true);
+      e.preventDefault();
     }
   };
 
+  // handleCanvasMouseMove関数を修正
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas || !selectedFurniture) return;
-
-    console.log('Mouse move - isDragging:', isDragging, 'isResizing:', isResizing);
+    if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const scale = 40;
-    const mouseX = (e.clientX - rect.left) / scale;
-    const mouseY = (e.clientY - rect.top) / scale;
+    let mouseX = (e.clientX - rect.left) / canvas.width;
+    let mouseY = (e.clientY - rect.top) / canvas.height;
 
-    if (isDragging && !isResizing) {
-      console.log('Dragging furniture to:', { mouseX, mouseY });
-      const x = Math.max(0, Math.min(TEST_ROOM.width - 1, mouseX));
-      const y = Math.max(0, Math.min(TEST_ROOM.height - 1, mouseY));
-
-      setFurniture(prev => prev.map(item =>
-        item.id === selectedFurniture
-          ? { ...item, position: { x, y } }
-          : item
-      ));
+    // キャリブレーション時は座標変換を適用
+    if (!showFurniture) {
+      const margin = 0.15;
+      const effectiveWidth = currentRoomSize.width + (margin * 2);
+      const effectiveHeight = currentRoomSize.height + (margin * 2);
+      
+      // キャンバス座標から正規化座標に逆変換
+      mouseX = (mouseX * (1 + 2 * margin / currentRoomSize.width)) - (margin / currentRoomSize.width);
+      mouseY = (mouseY * (1 + 2 * margin / currentRoomSize.height)) - (margin / currentRoomSize.height);
     }
 
-    if (isResizing && resizeHandle && originalSize) {
+    // ドア位置ドラッグ処理
+    if (isDraggingDoor) {
+      const snappedPosition = snapDoorToEdge(mouseX, mouseY);
+      setDoorPosition(snappedPosition);
+      return;
+    }
+
+    // ビーコンのドラッグ処理
+    if (selectedBeacon && isDragging) {
+      const x = Math.max(0.01, Math.min(0.99, mouseX));
+      const y = Math.max(0.01, Math.min(0.99, mouseY));
+
+      setBeaconPositions(prev => ({
+        ...prev,
+        [selectedBeacon]: { x, y }
+      }));
+      return;
+    }
+
+    // 家具のドラッグ処理
+    if (selectedFurniture && isDragging && !isResizing) {
+      const selectedItem = furniture.find(f => f.id === selectedFurniture);
+      if (selectedItem) {
+        const x = Math.max(0, Math.min(1 - selectedItem.width, mouseX - selectedItem.width / 2));
+        const y = Math.max(0, Math.min(1 - selectedItem.height, mouseY - selectedItem.height / 2));
+
+        setFurniture(prev => prev.map(item =>
+          item.id === selectedFurniture
+            ? { ...item, position: { x, y } }
+            : item
+        ));
+      }
+      return;
+    }
+
+    // リサイズ処理
+    if (selectedFurniture && isResizing && resizeHandle && originalSize) {
       const selectedItem = furniture.find(f => f.id === selectedFurniture);
       if (!selectedItem) return;
 
@@ -452,69 +1064,84 @@ export default function Calibration() {
       let newX = selectedItem.position.x;
       let newY = selectedItem.position.y;
 
-      const minSize = 0.5; // 最小サイズ
-      const maxSize = 5;   // 最大サイズ
+      const minSize = 0.02;
+      const maxSize = 0.5;
 
       switch (resizeHandle) {
-        case 'se': // 右下
+        case 'se':
           newWidth = Math.max(minSize, Math.min(maxSize, mouseX - selectedItem.position.x));
           newHeight = Math.max(minSize, Math.min(maxSize, mouseY - selectedItem.position.y));
           break;
-        case 'sw': // 左下
+        case 'sw':
           newWidth = Math.max(minSize, Math.min(maxSize, selectedItem.position.x + selectedItem.width - mouseX));
           newHeight = Math.max(minSize, Math.min(maxSize, mouseY - selectedItem.position.y));
-          newX = selectedItem.position.x + selectedItem.width - newWidth;
+          newX = Math.max(0, selectedItem.position.x + selectedItem.width - newWidth);
           break;
-        case 'ne': // 右上
+        case 'ne':
           newWidth = Math.max(minSize, Math.min(maxSize, mouseX - selectedItem.position.x));
           newHeight = Math.max(minSize, Math.min(maxSize, selectedItem.position.y + selectedItem.height - mouseY));
-          newY = selectedItem.position.y + selectedItem.height - newHeight;
+          newY = Math.max(0, selectedItem.position.y + selectedItem.height - newHeight);
           break;
-        case 'nw': // 左上
+        case 'nw':
           newWidth = Math.max(minSize, Math.min(maxSize, selectedItem.position.x + selectedItem.width - mouseX));
           newHeight = Math.max(minSize, Math.min(maxSize, selectedItem.position.y + selectedItem.height - mouseY));
-          newX = selectedItem.position.x + selectedItem.width - newWidth;
-          newY = selectedItem.position.y + selectedItem.height - newHeight;
+          newX = Math.max(0, selectedItem.position.x + selectedItem.width - newWidth);
+          newY = Math.max(0, selectedItem.position.y + selectedItem.height - newHeight);
           break;
       }
 
-      setFurniture(furniture.map(item =>
+      setFurniture(prev => prev.map(item =>
         item.id === selectedFurniture
           ? { ...item, width: newWidth, height: newHeight, position: { x: newX, y: newY } }
           : item
       ));
-    } else if (isDragging) {
-      // 既存のドラッグ処理
-      const x = Math.max(0, Math.min(TEST_ROOM.width - 1, mouseX));
-      const y = Math.max(0, Math.min(TEST_ROOM.height - 1, mouseY));
-
-      setFurniture(furniture.map(item =>
-      item.id === selectedFurniture
-        ? { ...item, position: { x, y } }
-        : item
-      ));
     }
 
-    // カーソルの変更
-    const selectedItem = furniture.find(f => f.id === selectedFurniture);
-    if (selectedItem && !isDragging && !isResizing) {
-      const handle = getResizeHandle(e, selectedItem);
-      if (handle) {
-        const cursors = { se: 'se-resize', sw: 'sw-resize', ne: 'ne-resize', nw: 'nw-resize' };
-        canvas.style.cursor = cursors[handle];
-      } else {
-        canvas.style.cursor = 'move';
+    // カーソル変更処理（自動配置されたドアにはリサイズハンドルを表示しない）
+    if (selectedBeacon) {
+      canvas.style.cursor = isDragging ? 'grabbing' : 'move';
+    } else if (selectedFurniture) {
+      const selectedItem = furniture.find(f => f.id === selectedFurniture);
+      if (selectedItem && !isDragging && !isResizing) {
+        const handle = getResizeHandle(e, selectedItem);
+        if (handle) {
+          const cursors = { 
+            se: 'se-resize', 
+            sw: 'sw-resize', 
+            ne: 'ne-resize', 
+            nw: 'nw-resize' 
+          };
+          canvas.style.cursor = cursors[handle];
+        } else {
+          canvas.style.cursor = 'move';
+        }
+      } else if (isDragging) {
+        canvas.style.cursor = 'grabbing';
+      } else if (isResizing) {
+        canvas.style.cursor = 'crosshair';
       }
-    } else if (!selectedFurniture) {
+    } else {
       canvas.style.cursor = 'default';
     }
   };
 
   const handleCanvasMouseUp = () => {
     setIsDragging(false);
+    setIsDraggingDoor(false);
     setIsResizing(false);
     setResizeHandle(null);
     setOriginalSize(null);
+
+    const canvas = canvasRef.current;
+    if (canvas) {
+      if (selectedBeacon) {
+        canvas.style.cursor = 'move';
+      } else if (selectedFurniture) {
+        canvas.style.cursor = 'move';
+      } else {
+        canvas.style.cursor = 'default';
+      }
+    }
   };
 
 
@@ -627,13 +1254,21 @@ export default function Calibration() {
     setCurrentMeasurement(null);
   };
 
+  // saveMeasurement関数内のドア配置部分を修正
   const saveMeasurement = () => {
+    const currentStep = CALIBRATION_STEPS[step - 1];
+    
+    // ドア位置選択ステップは測定不要なのでスキップ
+    if (currentStep.id === 'door_position_select') {
+      setStep(step + 1);
+      return;
+    }
+    
     if (!currentMeasurement) {
       alert('まず測定を行ってください');
       return;
     }
 
-    const currentStep = CALIBRATION_STEPS[step - 1];
     const point: CalibrationPoint = {
       id: currentStep.id,
       position: currentStep.position,
@@ -641,57 +1276,19 @@ export default function Calibration() {
       measurements: [currentMeasurement]
     };
 
-    setCalibrationPoints([...calibrationPoints, point]);
+    const updatedCalibrationPoints = [...calibrationPoints, point];
+    setCalibrationPoints(updatedCalibrationPoints);
     setCurrentMeasurement(null);
     
     if (step < CALIBRATION_STEPS.length) {
       setStep(step + 1);
     } else {
       // キャリブレーション完了
+      console.log('🎉 キャリブレーション完了');
+      alert('🎉 キャリブレーションが完了しました！\n\n次のステップで家具を配置してください。');
       setShowFurniture(true);
     }
   };
-
-  // const saveCalibration = async () => {
-  //   if (!roomName || selectedBeacons.length === 0) {
-  //     alert('部屋名とビーコンを設定してください');
-  //     return;
-  //   }
-
-  //   const roomProfile: Partial<RoomProfile> = {
-  //     name: roomName,
-  //     beacons: selectedBeacons,
-  //     calibrationPoints: calibrationPoints,
-  //     outline: { width: 10, height: 8 }, // TODO: 実際のサイズを入力できるようにする
-  //     furniture: furniture,
-  //     createdAt: new Date().toISOString(),
-  //     updatedAt: new Date().toISOString()
-  //   };
-
-  //   try {
-  //     await addDoc(collection(db, 'rooms'), roomProfile);
-  //     alert('キャリブレーションが完了しました！');
-  //     navigate('/mode1');
-  //   } catch (error) {
-  //     console.error('保存エラー:', error);
-  //     alert('保存に失敗しました');
-  //   }
-  // };
-
-  // const addFurniture = (type: FurnitureItem['type']) => {
-  //   const newItem: FurnitureItem = {
-  //     id: `furniture-${Date.now()}`,
-  //     type,
-  //     position: { x: 5, y: 4 },
-  //     width: 1,
-  //     height: 1
-  //   };
-  //   setFurniture([...furniture, newItem]);
-  // };
-
-  // const removeFurniture = (id: string) => {
-  //   setFurniture(furniture.filter(f => f.id !== id));
-  // };
 
   if (mode === 'mode2') {
     return (
@@ -805,45 +1402,192 @@ export default function Calibration() {
             <h2 style={{ marginBottom: '16px' }}>
               ステップ {step + 1}: {CALIBRATION_STEPS[step - 1].label}で測定
             </h2>
-            <p style={{ marginBottom: '16px', fontSize: '18px' }}>
-              <strong>{CALIBRATION_STEPS[step - 1].label}</strong>に移動して測定を行ってください。
-            </p>
 
-            <div className="form-group">
-              <label className="form-label">測定に使用するトラッカー</label>
-              <select
-                className="form-select"
-                value={selectedDevice}
-                onChange={(e) => setSelectedDevice(e.target.value)}
-              >
-                <option value="">選択してください</option>
-                {devices.map(device => (
-                  <option key={device.devEUI} value={device.devEUI}>
-                    {device.deviceId || device.userName}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* マップ表示を追加 */}
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ marginBottom: '12px', fontSize: '18px' }}>測定位置マップ</h3>
+              <div style={{ border: '2px solid #E1E8ED', borderRadius: '8px', padding: '8px', backgroundColor: '#F8F9FA' }}>
+                <canvas
+                  ref={canvasRef}
+                  style={{
+                    border: '1px solid #E1E8ED',
+                    borderRadius: '4px',
+                    display: 'block',
+                    margin: '0 auto',
+                    cursor: (step > 0 && CALIBRATION_STEPS[step - 1]?.id === 'door_position_select') 
+                      ? (isDraggingDoor ? 'grabbing' : 'grab') 
+                      : 'default'
+                  }}
+                  onMouseDown={handleCanvasMouseDown}
+                  onMouseMove={handleCanvasMouseMove}
+                  onMouseUp={handleCanvasMouseUp}
+                  onMouseLeave={handleCanvasMouseUp}
+                />
+              </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={startMeasurement}
-                  disabled={isScanning || !selectedDevice}
-                >
-                  {isScanning ? '測定中...' : 'ここで測定'}
-                </button>
-                {isScanning && (
-                  <button
-                    className="btn btn-outline"
-                    onClick={cancelMeasurement}
-                  >
-                    測定キャンセル
-                  </button>
-                )}
+              {/* 凡例 */}
+              <div style={{ marginTop: '12px', fontSize: '14px', display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '16px', height: '16px', backgroundColor: '#4CAF50', borderRadius: '50%' }}></div>
+                  <span>完了済み</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '16px', height: '16px', backgroundColor: '#FFC107', borderRadius: '50%' }}></div>
+                  <span>現在位置</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '16px', height: '16px', backgroundColor: '#9E9E9E', borderRadius: '50%' }}></div>
+                  <span>未完了</span>
+                </div>
               </div>
             </div>
+
+            {/* ドア位置選択ステップの場合は特別な表示 */}
+            {CALIBRATION_STEPS[step - 1]?.id === 'door_position_select' ? (
+              <>
+                <p style={{ marginBottom: '16px', fontSize: '18px' }}>
+                  🚪 <strong>ドアの位置を指定してください</strong>
+                </p>
+
+                {/* ドア位置選択の説明 */}
+                <div style={{ 
+                  marginBottom: '16px', 
+                  padding: '16px', 
+                  backgroundColor: '#FFF3CD', 
+                  borderRadius: '6px',
+                  border: '2px solid #FF9800'
+                }}>
+                  <h4 style={{ marginTop: 0, marginBottom: '12px', color: '#FF6F00' }}>
+                    📍 操作方法
+                  </h4>
+                  <ol style={{ margin: 0, paddingLeft: '20px', lineHeight: '1.8', color: '#856404' }}>
+                    <li>マップ上のオレンジ色の🚪マーカーをドラッグしてください</li>
+                    <li>ドアの位置が<strong>部屋の外枠（上下左右の辺）</strong>に自動的にスナップします</li>
+                    <li>実際のドアがある位置にマーカーを移動させてください</li>
+                    <li>位置が決まったら「次へ」ボタンをクリックしてください</li>
+                  </ol>
+                </div>
+
+                {/* 現在のドア位置表示 */}
+                <div style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px', 
+                  backgroundColor: '#E3F2FD', 
+                  borderRadius: '6px',
+                  border: '1px solid #BBDEFB'
+                }}>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#1976D2' }}>
+                    📍 <strong>現在のドア位置:</strong> ({doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)})<br />
+                    🧭 <strong>位置:</strong> {
+                      doorPosition.y === 0 ? '上の辺' :
+                      doorPosition.y === 1.0 ? '下の辺' :
+                      doorPosition.x === 0 ? '左の辺' :
+                      doorPosition.x === 1.0 ? '右の辺' : '外枠上'
+                    }
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={saveMeasurement}
+                  >
+                    次へ（ドアの測定へ）
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ marginBottom: '16px', fontSize: '18px' }}>
+                  <strong>{CALIBRATION_STEPS[step - 1].label}</strong>に移動して測定を行ってください。
+                </p>
+
+                {/* ドア内側・外側測定時の注意書き */}
+                {(CALIBRATION_STEPS[step - 1].id === 'door_inside' || CALIBRATION_STEPS[step - 1].id === 'door_outside') && (
+                  <div style={{ 
+                    marginBottom: '16px', 
+                    padding: '12px', 
+                    backgroundColor: '#FFF3CD', 
+                    borderRadius: '6px',
+                    border: '1px solid #FF9800'
+                  }}>
+                    <p style={{ margin: 0, fontSize: '14px', color: '#856404' }}>
+                      ℹ️ <strong>注意:</strong> マップ上のグレーの🚪アイコンは参照用です。<br />
+                      ドアの位置を変更したい場合は、
+                      <button
+                        onClick={() => setStep(step - 1)}
+                        style={{
+                          marginLeft: '4px',
+                          padding: '2px 8px',
+                          fontSize: '13px',
+                          backgroundColor: '#FF9800',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        前のステップに戻る
+                      </button>
+                      してください。
+                    </p>
+                  </div>
+                )}
+
+                {/* 測定位置の座標表示 */}
+                <div style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px', 
+                  backgroundColor: '#E3F2FD', 
+                  borderRadius: '6px',
+                  border: '1px solid #BBDEFB'
+                }}>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#1976D2' }}>
+                    📍 <strong>測定位置:</strong> {CALIBRATION_STEPS[step - 1].label}<br />
+                    📐 <strong>正規化座標:</strong> ({CALIBRATION_STEPS[step - 1].position.x.toFixed(3)}, {CALIBRATION_STEPS[step - 1].position.y.toFixed(3)})<br />
+                    {CALIBRATION_STEPS[step - 1].id === 'door_inside' && <span>🚪 ドア位置から部屋内側（{doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)}から内側）で測定してください</span>}
+                    {CALIBRATION_STEPS[step - 1].id === 'door_outside' && <span>🚪 ドア位置から部屋外側（{doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)}から外側）で測定してください</span>}
+                  </p>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">測定に使用するトラッカー</label>
+                  <select
+                    className="form-select"
+                    value={selectedDevice}
+                    onChange={(e) => setSelectedDevice(e.target.value)}
+                  >
+                    <option value="">選択してください</option>
+                    {devices.map(device => (
+                      <option key={device.devEUI} value={device.devEUI}>
+                        {device.deviceId || device.userName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={startMeasurement}
+                      disabled={isScanning || !selectedDevice}
+                    >
+                      {isScanning ? '測定中...' : 'ここで測定'}
+                    </button>
+                    {isScanning && (
+                      <button
+                        className="btn btn-outline"
+                        onClick={cancelMeasurement}
+                      >
+                        測定キャンセル
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
 
             {currentMeasurement && (
               <div style={{ marginBottom: '16px', padding: '16px', backgroundColor: '#D4EDDA', borderRadius: '8px' }}>
@@ -880,95 +1624,104 @@ export default function Calibration() {
             </div>
           </div>
         )}
+
+        {/* 全ステップ完了後の表示 */}
+        {step > CALIBRATION_STEPS.length && !showFurniture && (
+          <div className="card">
+            <h2 style={{ marginBottom: '16px', color: '#4CAF50' }}>
+              ✅ キャリブレーション完了！
+            </h2>
+            
+            {/* 完了マップ表示 */}
+            <div style={{ marginBottom: '20px' }}>
+              <h3 style={{ marginBottom: '12px' }}>測定完了マップ</h3>
+              <canvas
+                ref={canvasRef}
+                style={{
+                  border: '2px solid #4CAF50',
+                  borderRadius: '8px',
+                  display: 'block',
+                  margin: '0 auto'
+                }}
+              />
+            </div>
+
+            {/* 測定結果サマリー */}
+            <div style={{ 
+              marginBottom: '20px',
+              padding: '16px',
+              backgroundColor: '#E8F5E8',
+              borderRadius: '8px'
+            }}>
+              <h4 style={{ marginBottom: '12px', color: '#2E7D32' }}>📊 測定結果</h4>
+              <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                {calibrationPoints.map((point, index) => (
+                  <li key={point.id} style={{ marginBottom: '4px', color: '#2E7D32' }}>
+                    <strong>{point.label}</strong>: 
+                    ビーコン {Object.keys(point.measurements[0]?.rssiValues || {}).length}台検出
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <p style={{ marginBottom: '20px', fontSize: '16px' }}>
+              全ての測定ポイントでデータを取得しました。<br />
+              次に家具とビーコンの配置を行います。
+            </p>
+
+            <button 
+              className="btn btn-primary btn-lg" 
+              onClick={() => setShowFurniture(true)}
+              style={{ padding: '12px 24px', fontSize: '18px' }}
+            >
+              家具配置画面へ進む
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   // 家具配置画面
-  // return (
-  //   <div className="container">
-  //     <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-  //       家具とビーコンの配置
-  //     </h1>
-
-  //     <div className="card" style={{ marginBottom: '24px' }}>
-  //       <h2 style={{ marginBottom: '16px' }}>家具を配置</h2>
-  //       <p style={{ marginBottom: '16px' }}>
-  //         部屋のマップに家具やビーコンを配置してください（オプション）
-  //       </p>
-        
-  //       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-  //         <button className="btn btn-outline" onClick={() => addFurniture('desk')}>机を追加</button>
-  //         <button className="btn btn-outline" onClick={() => addFurniture('tv')}>テレビを追加</button>
-  //         <button className="btn btn-outline" onClick={() => addFurniture('piano')}>ピアノを追加</button>
-  //         <button className="btn btn-outline" onClick={() => addFurniture('door')}>ドアを追加</button>
-  //         <button className="btn btn-outline" onClick={() => addFurniture('chair')}>椅子を追加</button>
-  //       </div>
-
-  //       <div style={{ marginBottom: '16px' }}>
-  //         <h3 style={{ marginBottom: '8px' }}>配置した家具</h3>
-  //         {furniture.length === 0 ? (
-  //           <p style={{ color: '#7f8c8d' }}>まだ家具が配置されていません</p>
-  //         ) : (
-  //           <ul style={{ listStyle: 'none', padding: 0 }}>
-  //             {furniture.map(item => (
-  //               <li key={item.id} style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-  //                 <span>{item.type}</span>
-  //                 <button
-  //                   className="btn btn-danger"
-  //                   style={{ padding: '4px 12px', fontSize: '14px' }}
-  //                   onClick={() => removeFurniture(item.id)}
-  //                 >
-  //                   削除
-  //                 </button>
-  //               </li>
-  //             ))}
-  //           </ul>
-  //         )}
-  //       </div>
-
-  //       <div style={{ display: 'flex', gap: '12px' }}>
-  //         <button className="btn btn-primary" onClick={saveCalibration}>
-  //           完了
-  //         </button>
-  //         <button className="btn btn-outline" onClick={() => navigate('/mode1')}>
-  //           スキップ
-  //         </button>
-  //       </div>
-  //     </div>
-
-  //     <div className="card">
-  //       <h3 style={{ marginBottom: '16px' }}>使い方のヒント</h3>
-  //       <ul style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
-  //         <li>各測定ポイントで実際にトラッカーを持って移動してください</li>
-  //         <li>測定は静止した状態で行うと精度が上がります</li>
-  //         <li>追加のキャリブレーションポイントは後から追加できます</li>
-  //         <li>家具の配置は見やすさのためで、位置推定には影響しません</li>
-  //       </ul>
-  //     </div>
-  //   </div>
-  // );
-
   if (showFurniture || isFurnitureEditMode) {
     return (
       <div className="container">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '32px', fontWeight: '700' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+          <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
             {isFurnitureEditMode ? `家具配置の編集: ${roomName}` : isEditMode ? '家具配置の編集' : '家具とオブジェクトの配置'}
           </h1>
-          {isFurnitureEditMode && (
-            <button 
-              className="btn btn-outline"
-              onClick={() => navigate(`/edit-room/${roomId}`)}
-            >
-              ← ルーム編集に戻る
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={saveCalibration}>
+              {isEditMode || isFurnitureEditMode ? '更新' : '保存'}
             </button>
-          )}
+            <button 
+              className="btn btn-outline" 
+              onClick={() => {
+                if (isFurnitureEditMode) {
+                  navigate(`/edit-room/${roomId}`);
+                } else if (isEditMode) {
+                  navigate('/management');
+                } else {
+                  navigate('/mode1');
+                }
+              }}
+            >
+              キャンセル
+            </button>
+            {isFurnitureEditMode && (
+              <button 
+                className="btn btn-outline"
+                onClick={() => navigate(`/edit-room/${roomId}`)}
+              >
+                ルーム編集に戻る
+              </button>
+            )}
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '24px' }}>
+        <div style={{ display: 'flex', gap: '24px', flexDirection: window.innerWidth <= 768 ? 'column' : 'row' }}>
           {/* 左側: コントロールパネル */}
-          <div style={{ width: '300px' }}>
+          <div style={{ width: window.innerWidth <= 768 ? '100%' : '300px' }}>
             {(isEditMode || isFurnitureEditMode) && (
               <div className="card" style={{ marginBottom: '16px', backgroundColor: '#FFF3CD', border: '1px solid #FFEAA7' }}>
                 <h3 style={{ marginBottom: '12px', color: '#856404' }}>編集モード</h3>
@@ -983,7 +1736,6 @@ export default function Calibration() {
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>部屋サイズ（オプション）</h3>
               <p style={{ fontSize: '14px', color: '#7f8c8d', marginBottom: '12px' }}>
-                実際の部屋サイズを入力すると、メートル単位で保存されます。<br />
                 未入力の場合は、0~1の正規化座標で保存されます。
               </p>
               <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
@@ -1021,15 +1773,16 @@ export default function Calibration() {
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>家具を追加</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {Object.entries(FURNITURE_TYPES).map(([type, info]) => (
-                  <button
-                    key={type}
-                    className="btn btn-outline"
-                    onClick={() => addFurniture(type as FurnitureType)} // 型アサーションを修正
-                  >
+                {Object.entries(getFurnitureTypes(currentRoomSize.width, currentRoomSize.height))
+                  .map(([type, info]) => (
+                    <button
+                      key={type}
+                      className="btn btn-outline"
+                      onClick={() => addFurniture(type as FurnitureType)}
+                    >
                       {info.label}を追加
                     </button>
-                ))}
+                  ))}
               </div>
             </div>
             
@@ -1040,7 +1793,14 @@ export default function Calibration() {
                 <p style={{ color: '#7f8c8d', fontSize: '14px' }}>まだ家具が配置されていません</p>
               ) : (
                 <div>
-                  {furniture.map(item => (
+                  {furniture.map(item => {
+                    const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
+                    // doorタイプの家具は表示しない（廃止された機能）
+                    if (item.type === 'door' as any) return null;
+                    const furnitureType = furnitureTypes[item.type];
+                    if (!furnitureType) return null;
+                    
+                    return (
                     <div
                       key={item.id}
                       style={{
@@ -1056,7 +1816,7 @@ export default function Calibration() {
                       onClick={() => setSelectedFurniture(selectedFurniture === item.id ? null : item.id)}
                     >
                       <span style={{ fontSize: '14px' }}>
-                        {FURNITURE_TYPES[item.type].label}
+                        {furnitureType.label}
                       </span>
                       <button
                         className="btn btn-danger"
@@ -1069,7 +1829,54 @@ export default function Calibration() {
                         削除
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 既存の家具リストの後に追加 */}
+            <div className="card" style={{ marginBottom: '16px' }}>
+              <h3 style={{ marginBottom: '16px' }}>ビーコン位置</h3>
+              {selectedBeacons.length === 0 ? (
+                <p style={{ color: '#7f8c8d', fontSize: '14px' }}>ビーコンが設定されていません</p>
+              ) : (
+                <div>
+                  {selectedBeacons.map(beaconId => {
+                    const beacon = TEST_ROOM.beacons.find(b => b.id === beaconId);
+                    if (!beacon) return null;
+                    const position = beaconPositions[beaconId] || beacon.position;
+                    return (
+                      <div
+                        key={beaconId}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px',
+                          marginBottom: '4px',
+                          backgroundColor: selectedBeacon === beaconId ? '#E3F2FD' : '#F8F9FA',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          border: selectedBeacon === beaconId ? '2px solid #4A90E2' : '1px solid #E1E8ED'
+                        }}
+                        onClick={() => setSelectedBeacon(selectedBeacon === beaconId ? null : beaconId)}
+                      >
+                        <div style={{ fontSize: '14px' }}>
+                          <strong>{beacon.name}</strong><br />
+                          <span style={{ color: '#7f8c8d', fontSize: '12px' }}>
+                            ({position.x.toFixed(2)}, {position.y.toFixed(2)})
+                          </span>
+                        </div>
+                        <div style={{ 
+                          width: '16px', 
+                          height: '16px', 
+                          backgroundColor: '#4A90E2', 
+                          borderRadius: '50%' 
+                        }} />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1077,39 +1884,23 @@ export default function Calibration() {
             <div className="card">
               <h3 style={{ marginBottom: '12px' }}>操作方法</h3>
               <ul style={{ fontSize: '14px', lineHeight: '1.6', paddingLeft: '16px' }}>
-                <li>家具をクリックして選択</li>
-                <li>選択した家具をドラッグで移動</li>
+                <li>家具またはビーコン（青い円）をクリックして選択</li>
+                <li>選択したオブジェクトをドラッグで移動</li>
                 <li>選択した家具の角（赤い四角）をドラッグでサイズ変更</li>
-                <li>青い点はビーコンの位置</li>
-                <li>グリッド1マス = 1メートル</li>
+                <li>ビーコンはドラッグ移動のみ可能</li>
+                <li>グリッド1マス = 0.1単位（正規化座標）</li>
               </ul>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-              <button className="btn btn-primary" onClick={saveCalibration}>
-                {isEditMode || isFurnitureEditMode ? '更新' : '保存'}
-              </button>
-              <button 
-                className="btn btn-outline" 
-                onClick={() => {
-                  if (isFurnitureEditMode) {
-                    navigate(`/edit-room/${roomId}`);
-                  } else if (isEditMode) {
-                    navigate('/management');
-                  } else {
-                    navigate('/mode1');
-                  }
-                }}
-              >
-                キャンセル
-              </button>
             </div>
           </div>
 
           {/* 右側: マップ */}
           <div className="card" style={{ flex: 1 }}>
             <h3 style={{ marginBottom: '16px' }}>
-              {roomName || TEST_ROOM.name} ({TEST_ROOM.width}m × {TEST_ROOM.height}m)
+              {roomName || TEST_ROOM.name} (
+              {roomWidth && roomHeight 
+                ? `${currentRoomSize.width.toFixed(1)}m × ${currentRoomSize.height.toFixed(1)}m`
+                : `${currentRoomSize.width.toFixed(1)} × ${currentRoomSize.height.toFixed(1)}`
+              })
             </h3>
             <canvas
               ref={canvasRef}
@@ -1126,7 +1917,12 @@ export default function Calibration() {
             />
             {selectedFurniture && (
               <p style={{ marginTop: '12px', fontSize: '14px', color: '#4A90E2' }}>
-                選択中: {FURNITURE_TYPES[furniture.find(f => f.id === selectedFurniture)?.type as FurnitureType || 'desk'].label}
+                選択中: {(() => {
+                  const selectedItem = furniture.find(f => f.id === selectedFurniture);
+                  const furnitureTypes = getFurnitureTypes(currentRoomSize.width, currentRoomSize.height);
+                  const furnitureType = selectedItem ? furnitureTypes[selectedItem.type] : null;
+                  return furnitureType ? furnitureType.label : '不明';
+                })()}
                 （ドラッグして移動、角をドラッグでサイズ変更）
               </p>
             )}

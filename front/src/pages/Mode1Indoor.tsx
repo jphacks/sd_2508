@@ -5,6 +5,14 @@ import { rtdb, db } from "../firebase";
 import { Device, BLEScan, RoomProfile, Alert, Beacon } from "../types";
 import { estimatePositionHybrid } from "../utils/positioning";
 
+const FURNITURE_TYPES = {
+  desk: { label: '机', width: 2, height: 1, color: '#8B4513' },
+  tv: { label: 'テレビ', width: 3, height: 0.5, color: '#2C3E50' },
+  piano: { label: 'ピアノ', width: 2, height: 1.5, color: '#1A1A1A' },
+  chair: { label: '椅子', width: 0.8, height: 0.8, color: '#CD853F' },
+  door: { label: 'ドア', width: 1, height: 0.2, color: '#D2691E' }
+} as const;
+
 export default function Mode1Indoor() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
@@ -16,6 +24,8 @@ export default function Mode1Indoor() {
   );
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alertOnExit, setAlertOnExit] = useState(true);
+  const [alertSound, setAlertSound] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -296,7 +306,15 @@ export default function Mode1Indoor() {
 
   const drawRoom = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !roomProfile) return;
+    if (!canvas || !roomProfile) {
+      console.log('Canvas or roomProfile not ready');
+      return;
+    }
+
+    console.log('Drawing room...', { 
+      furniture: roomProfile.furniture?.length || 0,
+      devices: devicePositions.size 
+    });
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -367,6 +385,8 @@ export default function Mode1Indoor() {
 
     // グリッド線（オプション）
     ctx.strokeStyle = "#e1e8ed";
+    // グリッド線（最背面）
+    ctx.strokeStyle = '#e1e8ed';
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
     for (let i = 1; i < roomProfile.outline!.width; i++) {
@@ -384,7 +404,204 @@ export default function Mode1Indoor() {
       ctx.stroke();
     }
     ctx.setLineDash([]);
+
+    // 家具を描画（中間層）
+    if (roomProfile.furniture && roomProfile.furniture.length > 0) {
+      console.log('Drawing furniture:', roomProfile.furniture.length);
+      roomProfile.furniture.forEach(furniture => {
+        const furnitureType = FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
+        const furnitureColor = furnitureType?.color || '#95a5a6';
+        
+        ctx.fillStyle = furnitureColor;
+        // 正規化座標（0-1）× ルームサイズ = 実際のメートル位置
+        const furnitureX = furniture.position.x * roomProfile.outline!.width;
+        const furnitureY = furniture.position.y * roomProfile.outline!.height;
+        const furnitureW = furniture.width * roomProfile.outline!.width;
+        const furnitureH = furniture.height * roomProfile.outline!.height;
+        
+        const x = padding + furnitureX * scale;
+        const y = padding + furnitureY * scale;
+        const w = furnitureW * scale;
+        const h = furnitureH * scale;
+        
+        ctx.fillRect(x, y, w, h);
+        
+        // 家具の境界線
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, w, h);
+        
+        // ラベル
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 2;
+        
+        ctx.strokeText(furnitureType?.label || furniture.type, x + w / 2, y + h / 2 + 4);
+        ctx.fillText(furnitureType?.label || furniture.type, x + w / 2, y + h / 2 + 4);
+      });
+    }
+
+    // ドアを描画（キャリブレーションポイントから取得）
+    if (roomProfile.calibrationPoints) {
+      const doorInside = roomProfile.calibrationPoints.find(p => p.id === 'door_inside');
+      const doorOutside = roomProfile.calibrationPoints.find(p => p.id === 'door_outside');
+      
+      if (doorInside && doorOutside) {
+        // ドアの中心位置を計算
+        const doorCenterX = (doorInside.position.x + doorOutside.position.x) / 2;
+        const doorCenterY = (doorInside.position.y + doorOutside.position.y) / 2;
+        
+        // ドアの向きを計算（内側→外側のベクトル）
+        const doorVectorX = doorOutside.position.x - doorInside.position.x;
+        const doorVectorY = doorOutside.position.y - doorInside.position.y;
+        const doorAngle = Math.atan2(doorVectorY, doorVectorX);
+        
+        // ドアのサイズ（メートル単位）
+        const doorWidth = 0.9; // 0.9m幅
+        const doorThickness = 0.05; // 5cm厚
+        
+        // メートル位置に変換
+        const doorDisplayX = doorCenterX * roomProfile.outline!.width;
+        const doorDisplayY = doorCenterY * roomProfile.outline!.height;
+        
+        const x = padding + doorDisplayX * scale;
+        const y = padding + doorDisplayY * scale;
+        
+        // ドアを描画（回転を考慮）
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(doorAngle + Math.PI / 2); // ベクトルに垂直
+        
+        // ドアの矩形（幅0.9m、厚さ5cm）
+        const doorW = doorWidth * scale;
+        const doorH = doorThickness * scale;
+        
+        ctx.fillStyle = '#D2691E';
+        ctx.fillRect(-doorW / 2, -doorH / 2, doorW, doorH);
+        
+        // ドアの境界線
+        ctx.strokeStyle = '#8B4513';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-doorW / 2, -doorH / 2, doorW, doorH);
+        
+        // ドアノブ（小さい円）
+        ctx.beginPath();
+        ctx.arc(doorW / 2 - 10, 0, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFD700';
+        ctx.fill();
+        ctx.strokeStyle = '#DAA520';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        ctx.restore();
+        
+        // ドアアイコンとラベル
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#8B4513';
+        ctx.fillText('🚪', x, y);
+        
+        // ラベル「ドア」
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#8B4513';
+        ctx.lineWidth = 3;
+        ctx.strokeText('ドア', x, y + 20);
+        ctx.fillText('ドア', x, y + 20);
+      }
+    }
+
+    // デバイスの位置を描画（最前面）
+    if (devicePositions.size > 0) {
+      console.log('Drawing devices:', devicePositions.size);
+      devicePositions.forEach((position, deviceId) => {
+        const device = devices.find(d => d.devEUI === deviceId);
+        
+        // 位置座標を変換：正規化座標（0-1）× ルームサイズ（メートル）
+        const displayX = position.x * roomProfile.outline!.width;
+        const displayY = position.y * roomProfile.outline!.height;
+        
+        const x = padding + displayX * scale;
+        const y = padding + displayY * scale;
+
+        // デバイスの影
+        ctx.beginPath();
+        ctx.arc(x + 2, y + 2, 14, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.fill();
+
+        // デバイスの円（メイン）
+        ctx.beginPath();
+        ctx.arc(x, y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = '#4A90E2';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // 内側の小さな円
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+
+        // 名前（背景付き）
+        const deviceName = device?.userName || device?.deviceId || deviceId;
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        
+        const textMetrics = ctx.measureText(deviceName);
+        const textWidth = textMetrics.width + 8;
+        const textHeight = 16;
+      
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.fillRect(
+          x - textWidth / 2, 
+          y - 35 - textHeight / 2, 
+          textWidth, 
+          textHeight
+        );
+
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(
+          x - textWidth / 2, 
+          y - 35 - textHeight / 2, 
+          textWidth, 
+          textHeight
+        );
+
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillText(deviceName, x, y - 30);
+
+        // 位置座標（正規化座標 × ルームサイズ = 実際のメートル位置）
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillText(
+          `(${displayX.toFixed(1)}m, ${displayY.toFixed(1)}m)`, 
+          x, 
+          y + 25
+        );
+      });
+    }
+
+    console.log('Room drawing completed');
   };
+
+  useEffect(() => {
+    console.log('Drawing trigger - roomProfile:', !!roomProfile, 'devices:', devicePositions.size);
+    if (roomProfile) {
+      // 少し遅延させて確実に描画
+      const timer = setTimeout(() => {
+        drawRoom();
+      }, 50);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [roomProfile, devicePositions, devices]);
 
   if (loading) {
     return (
@@ -396,6 +613,7 @@ export default function Mode1Indoor() {
 
   return (
     <div className="container">
+<<<<<<< HEAD
       <div
         style={{
           display: "flex",
@@ -405,6 +623,10 @@ export default function Mode1Indoor() {
         }}
       >
         <h1 style={{ fontSize: "32px", fontWeight: "700", margin: 0 }}>
+=======
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '700', margin: 0 }}>
+>>>>>>> origin/main
           機能1 : 室内位置追跡
         </h1>
         <h2
@@ -448,6 +670,7 @@ export default function Mode1Indoor() {
         </div>
       ))}
 
+<<<<<<< HEAD
       <div style={{ display: "flex", gap: "24px" }}>
         {/* 左側: ユーザー名と設定 */}
         <div
@@ -458,6 +681,11 @@ export default function Mode1Indoor() {
             gap: "24px",
           }}
         >
+=======
+      <div style={{ display: 'flex', gap: '24px', flexDirection: window.innerWidth <= 768 ? 'column' : 'row' }}>
+        {/* 左側: ユーザー名と設定 */}
+        <div style={{ width: window.innerWidth <= 768 ? '100%' : '300px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+>>>>>>> origin/main
           <div className="card">
             <h3 style={{ marginBottom: "12px" }}>ユーザー名</h3>
             {devices.map((device) => {
@@ -528,6 +756,7 @@ export default function Mode1Indoor() {
             <h3 style={{ marginBottom: "12px" }}>設定</h3>
             <div className="form-group">
               <label className="form-label">部屋退出時の警告</label>
+<<<<<<< HEAD
               <label
                 style={{ display: "flex", alignItems: "center", gap: "8px" }}
               >
@@ -543,13 +772,80 @@ export default function Mode1Indoor() {
                 <input type="checkbox" defaultChecked />
                 有効
               </label>
+=======
+              <button
+                onClick={() => setAlertOnExit(!alertOnExit)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: alertOnExit ? '#50C878' : '#E0E0E0',
+                  color: alertOnExit ? 'white' : '#666'
+                }}
+              >
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: 'white',
+                    transition: 'transform 0.3s ease',
+                    transform: alertOnExit ? 'translateX(0)' : 'translateX(0)'
+                  }}
+                />
+                {alertOnExit ? '有効' : '無効'}
+              </button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">警告音</label>
+              <button
+                onClick={() => setAlertSound(!alertSound)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backgroundColor: alertSound ? '#50C878' : '#E0E0E0',
+                  color: alertSound ? 'white' : '#666'
+                }}
+              >
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: 'white',
+                    transition: 'transform 0.3s ease',
+                    transform: alertSound ? 'translateX(0)' : 'translateX(0)'
+                  }}
+                />
+                {alertSound ? '有効' : '無効'}
+              </button>
+>>>>>>> origin/main
             </div>
           </div>
         </div>
 
         {/* 右側: 部屋表示パネル */}
         <div className="card" style={{ flex: 1 }}>
+<<<<<<< HEAD
           <div style={{ position: "relative", width: "100%", height: "600px" }}>
+=======
+          <div style={{ position: 'relative', width: '100%', height: window.innerWidth <= 768 ? '400px' : '600px' }}>
+>>>>>>> origin/main
             <canvas
               ref={canvasRef}
               width={800}
