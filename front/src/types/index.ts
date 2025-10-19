@@ -9,7 +9,7 @@ export interface Device {
   model: string;
   firmware?: string;
   ownerUid: string;
-  status: 'active' | 'inactive';
+  status: "active" | "inactive";
   tags?: string[];
   userName?: string; // トラッカー所持者のユーザー名
 }
@@ -21,7 +21,7 @@ export interface Beacon {
   uuid?: string;
   major?: number;
   minor?: number;
-  type: 'ibeacon' | 'eddystone' | 'raw';
+  type: "ibeacon" | "eddystone" | "raw";
   rssiAt1m?: number;
   place?: { x: number; y: number };
   anchor_loc?: { lat: number; lon: number };
@@ -105,7 +105,7 @@ export interface CalibrationPoint {
 }
 
 // 家具アイテム
-export type FurnitureType = 'desk' | 'tv' | 'piano' | 'chair' | 'door';
+export type FurnitureType = "desk" | "tv" | "piano" | "chair" | "door";
 
 export interface FurnitureItem {
   id: string;
@@ -116,7 +116,7 @@ export interface FurnitureItem {
 }
 
 // アプリケーションモード
-export type AppMode = 'mode1' | 'mode2' | 'mode3';
+export type AppMode = "mode1" | "mode2" | "mode3";
 
 // 機能1の設定
 export interface Mode1Config {
@@ -151,7 +151,7 @@ export interface AppConfig {
 // アラート情報
 export interface Alert {
   id: string;
-  type: 'exit_room' | 'bus_left_behind' | 'separated';
+  type: "exit_room" | "bus_left_behind" | "separated" | "shock";
   message: string;
   deviceId?: string;
   deviceName?: string;
