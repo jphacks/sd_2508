@@ -102,7 +102,7 @@ export default function EditRoom() {
           className="btn btn-outline"
           onClick={() => navigate('/management')}
         >
-          ← 一覧に戻る
+          戻る
         </button>
       </div>
 
@@ -165,119 +165,131 @@ export default function EditRoom() {
             {room.outline ? 'サイズを更新' : 'サイズを設定'}
           </button>
         </div>
-
-        <div style={{
-          padding: '12px',
-          backgroundColor: '#E3F2FD',
-          borderRadius: '8px',
-          fontSize: '14px'
-        }}>
-          <strong>現在の設定:</strong>{' '}
-          {room.outline 
-            ? `${room.outline.width}m × ${room.outline.height}m（実寸）` 
-            : '正規化座標（0~1）で保存されています'}
-        </div>
       </div>
 
-      {/* キャリブレーション点の追加 */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>📍 キャリブレーション点の管理</h2>
-        <p style={{ marginBottom: '16px', fontSize: '14px', color: '#7f8c8d' }}>
-          キャリブレーション点を追加することで、位置推定の精度を向上できます。
-        </p>
+      {/* キャリブレーション点と家具情報を並べて表示 */}
+      <div style={{ display: 'flex', gap: '24px', marginBottom: '24px' }}>
+        {/* キャリブレーション点の追加 */}
+        <div className="card" style={{ flex: 1 }}>
+          <h2 style={{ marginBottom: '16px' }}>📍 キャリブレーション点の管理</h2>
+          <p style={{ marginBottom: '16px', fontSize: '14px', color: '#7f8c8d' }}>
+            キャリブレーション点を追加することで、位置推定の精度を向上できます。
+          </p>
 
-        <div style={{ marginBottom: '16px' }}>
-          <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>現在のキャリブレーション点</h3>
-          {room.calibrationPoints && room.calibrationPoints.length > 0 ? (
-            <ul style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
-              {room.calibrationPoints.map((point, index) => (
-                <li key={point.id || index}>
-                  <strong>{point.label}</strong> - 
-                  位置: ({point.position.x.toFixed(2)}, {point.position.y.toFixed(2)}) - 
-                  測定数: {point.measurements.length}回
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p style={{ color: '#7f8c8d' }}>キャリブレーション点がありません</p>
-          )}
-        </div>
-
-        <button
-          className="btn btn-primary"
-          onClick={() => navigate(`/add-calibration-point/${roomId}`)}
-        >
-          ＋ キャリブレーション点を追加
-        </button>
-      </div>
-
-      {/* ビーコンとその他の情報 */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>📡 ビーコン情報</h2>
-        <p style={{ marginBottom: '8px' }}>
-          <strong>使用ビーコン数:</strong> {room.beacons.length}台
-        </p>
-        {room.beaconPositions && room.beaconPositions.length > 0 && (
-          <div style={{ marginTop: '12px' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>ビーコン配置</h3>
-            <ul style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
-              {room.beaconPositions.map((beacon, index) => (
-                <li key={index}>
-                  <strong>{beacon.name}</strong> - 
-                  位置: ({(beacon.position.x * 100).toFixed(0)}%, {(beacon.position.y * 100).toFixed(0)}%)
-                </li>
-              ))}
-            </ul>
+          <div style={{ marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>現在のキャリブレーション点</h3>
+            {room.calibrationPoints && room.calibrationPoints.length > 0 ? (
+              <ul style={{ paddingLeft: '20px', lineHeight: '1.8', fontSize: '14px' }}>
+                {room.calibrationPoints.map((point, index) => {
+                  // 部屋サイズが設定されている場合はメートル単位で表示、それ以外は正規化座標で表示
+                  const displayX = room.outline ? (point.position.x * room.outline.width).toFixed(2) : point.position.x.toFixed(2);
+                  const displayY = room.outline ? (point.position.y * room.outline.height).toFixed(2) : point.position.y.toFixed(2);
+                  const unit = room.outline ? 'm' : '(正規化)';
+                  
+                  return (
+                    <li key={point.id || index}>
+                      <strong>{point.label}</strong> - 
+                      位置: ({displayX}, {displayY}){unit} - 
+                      測定数: {point.measurements.length}回
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p style={{ color: '#7f8c8d' }}>キャリブレーション点がありません</p>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* 家具情報と編集ボタン */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h2>🪑 家具とオブジェクトの配置</h2>
           <button
             className="btn btn-primary"
-            onClick={() => navigate(`/edit-furniture/${roomId}`)}
+            onClick={() => navigate(`/add-calibration-point/${roomId}`)}
           >
-            家具配置を編集
+            ＋ キャリブレーション点を追加
           </button>
         </div>
-        
-        {room.furniture && room.furniture.length > 0 ? (
-          <>
-            <p style={{ marginBottom: '12px' }}>
-              <strong>配置済み家具:</strong> {room.furniture.length}個
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', marginBottom: '16px' }}>
-              {room.furniture.map((item, index) => (
-                <div
-                  key={item.id || index}
-                  style={{
-                    padding: '8px 12px',
-                    backgroundColor: '#F8F9FA',
-                    borderRadius: '4px',
-                    fontSize: '14px',
-                    border: '1px solid #E1E8ED'
-                  }}
-                >
-                  <strong>{item.type}</strong><br />
-                  位置: ({item.position.x.toFixed(1)}, {item.position.y.toFixed(1)})<br />
-                  サイズ: {item.width.toFixed(1)} × {item.height.toFixed(1)}
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#7f8c8d' }}>
-            <p style={{ marginBottom: '16px' }}>まだ家具が配置されていません</p>
+
+        {/* 家具情報と編集ボタン */}
+        <div className="card" style={{ flex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h2 style={{ margin: 0 }}>🪑 家具とオブジェクトの配置</h2>
             <button
-              className="btn btn-outline"
+              className="btn btn-primary"
               onClick={() => navigate(`/edit-furniture/${roomId}`)}
+              style={{ marginBottom: 0 }}
             >
-              家具配置を開始
+              編集
             </button>
           </div>
+          
+          {room.furniture && room.furniture.length > 0 ? (
+            <>
+              <p style={{ marginBottom: '12px', fontSize: '14px' }}>
+                <strong>配置済み家具:</strong> {room.furniture.length}個
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px', maxHeight: '300px', overflowY: 'auto' }}>
+                {room.furniture.map((item, index) => (
+                  <div
+                    key={item.id || index}
+                    style={{
+                      padding: '8px 12px',
+                      backgroundColor: '#F8F9FA',
+                      borderRadius: '4px',
+                      fontSize: '13px',
+                      border: '1px solid #E1E8ED'
+                    }}
+                  >
+                    <strong>{item.type}</strong><br />
+                    <span style={{ color: '#7f8c8d', fontSize: '12px' }}>
+                      位置: ({item.position.x.toFixed(1)}, {item.position.y.toFixed(1)})<br />
+                      サイズ: {item.width.toFixed(1)} × {item.height.toFixed(1)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '20px', color: '#7f8c8d' }}>
+              <p style={{ marginBottom: '12px', fontSize: '14px' }}>まだ家具が配置されていません</p>
+              <button
+                className="btn btn-outline"
+                onClick={() => navigate(`/edit-furniture/${roomId}`)}
+              >
+                配置を開始
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ビーコン情報 */}
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <h2 style={{ marginBottom: '16px' }}>📡 ビーコン情報</h2>
+        <p style={{ marginBottom: '16px', fontSize: '14px' }}>
+          <strong>使用ビーコン数:</strong> {room.beacons.length}台
+        </p>
+        {room.beaconPositions && room.beaconPositions.length > 0 ? (
+          <div>
+            <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>ビーコン配置</h3>
+            <ul style={{ paddingLeft: '20px', lineHeight: '2', fontSize: '14px' }}>
+              {room.beaconPositions.map((beacon, index) => {
+                // 部屋サイズが設定されている場合はメートル単位で表示、それ以外は正規化座標で表示
+                const displayX = room.outline ? (beacon.position.x * room.outline.width).toFixed(2) : (beacon.position.x * 100).toFixed(0);
+                const displayY = room.outline ? (beacon.position.y * room.outline.height).toFixed(2) : (beacon.position.y * 100).toFixed(0);
+                const unit = room.outline ? 'm' : '%';
+                
+                return (
+                  <li key={index}>
+                    <strong>{beacon.name}</strong><br />
+                    <span style={{ fontSize: '12px', color: '#7f8c8d', marginLeft: '8px' }}>
+                      位置: ({displayX}{unit}, {displayY}{unit})
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : (
+          <p style={{ color: '#7f8c8d' }}>ビーコンが配置されていません</p>
         )}
       </div>
 
