@@ -1,7 +1,7 @@
 # 見守りカード -mimoca-
 
-[![IMAGE ALT TEXT HERE](https://github.com/jphacks/sd_2508/blob/main/image/mimoca_home.png)](https://www.youtube.com/watch?v=lA9EluZugD8)
-⇧⇧⇧動画に飛べます
+[![IMAGE ALT TEXT HERE](https://github.com/jphacks/sd_2508/blob/main/image/mimoca_home.png)](https://youtu.be/AdLN6ilkmZE)
+⇧⇧⇧画像をクリックすると動画に飛べます！！
 
 webアプリケーションURL: ログインが必要です
 [https://mimamoricard-2b3f6.web.app/](https://mimamoricard-2b3f6.web.app/)
