@@ -21,7 +21,6 @@ export default function Mode1Indoor() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [alertOnExit, setAlertOnExit] = useState(true);
-  const [alertSound, setAlertSound] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -624,38 +623,6 @@ export default function Mode1Indoor() {
                   }}
                 />
                 {alertOnExit ? '有効' : '無効'}
-              </button>
-            </div>
-            <div className="form-group">
-              <label className="form-label">警告音</label>
-              <button
-                onClick={() => setAlertSound(!alertSound)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 16px',
-                  borderRadius: '20px',
-                  border: 'none',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease',
-                  backgroundColor: alertSound ? '#50C878' : '#E0E0E0',
-                  color: alertSound ? 'white' : '#666'
-                }}
-              >
-                <div
-                  style={{
-                    width: '20px',
-                    height: '20px',
-                    borderRadius: '50%',
-                    backgroundColor: 'white',
-                    transition: 'transform 0.3s ease',
-                    transform: alertSound ? 'translateX(0)' : 'translateX(0)'
-                  }}
-                />
-                {alertSound ? '有効' : '無効'}
               </button>
             </div>
           </div>
