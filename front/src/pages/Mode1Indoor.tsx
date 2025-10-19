@@ -552,15 +552,6 @@ export default function Mode1Indoor() {
           textHeight
         );
 
-        ctx.strokeStyle = "#2c3e50";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(
-          x - textWidth / 2,
-          y - 35 - textHeight / 2,
-          textWidth,
-          textHeight
-        );
-
         ctx.fillStyle = "#2c3e50";
         ctx.fillText(deviceName, x, y - 30);
 
