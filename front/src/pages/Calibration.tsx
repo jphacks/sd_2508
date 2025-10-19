@@ -1733,7 +1733,7 @@ export default function Calibration() {
                 }}>
                   <p style={{ margin: 0, fontSize: '14px', color: '#1976D2' }}>
                     📍 <strong>測定位置:</strong> {CALIBRATION_STEPS[step - 1].label}<br />
-                    📐 <strong>座標:</strong> ({CALIBRATION_STEPS[step - 1].position.x.toFixed(3)}, {CALIBRATION_STEPS[step - 1].position.y.toFixed(3)})<br />
+                    📐 <strong>正規化座標:</strong> ({CALIBRATION_STEPS[step - 1].position.x.toFixed(3)}, {CALIBRATION_STEPS[step - 1].position.y.toFixed(3)})<br />
                     {CALIBRATION_STEPS[step - 1].id === 'door_inside' && <span>🚪 ドア位置から部屋内側（{doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)}から内側）で測定してください</span>}
                     {CALIBRATION_STEPS[step - 1].id === 'door_outside' && <span>🚪 ドア位置から部屋外側（{doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)}から外側）で測定してください</span>}
                   </p>
@@ -1901,7 +1901,7 @@ export default function Calibration() {
                 className="btn btn-outline"
                 onClick={() => navigate(`/edit-room/${roomId}`)}
               >
-                ← ルーム編集に戻る
+                ルーム編集に戻る
               </button>
             )}
           </div>
@@ -2022,27 +2022,29 @@ export default function Calibration() {
             {/* 既存の家具リストの後に追加 */}
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>ビーコン位置</h3>
-              {TEST_ROOM.beacons.length === 0 ? (
+              {selectedBeacons.length === 0 ? (
                 <p style={{ color: '#7f8c8d', fontSize: '14px' }}>ビーコンが設定されていません</p>
               ) : (
                 <div>
-                  {TEST_ROOM.beacons.map(beacon => {
-                    const position = beaconPositions[beacon.id] || beacon.position;
+                  {selectedBeacons.map(beaconId => {
+                    const beacon = TEST_ROOM.beacons.find(b => b.id === beaconId);
+                    if (!beacon) return null;
+                    const position = beaconPositions[beaconId] || beacon.position;
                     return (
                       <div
-                        key={beacon.id}
+                        key={beaconId}
                         style={{
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
                           padding: '8px',
                           marginBottom: '4px',
-                          backgroundColor: selectedBeacon === beacon.id ? '#E3F2FD' : '#F8F9FA',
+                          backgroundColor: selectedBeacon === beaconId ? '#E3F2FD' : '#F8F9FA',
                           borderRadius: '4px',
                           cursor: 'pointer',
-                          border: selectedBeacon === beacon.id ? '2px solid #4A90E2' : '1px solid #E1E8ED'
+                          border: selectedBeacon === beaconId ? '2px solid #4A90E2' : '1px solid #E1E8ED'
                         }}
-                        onClick={() => setSelectedBeacon(selectedBeacon === beacon.id ? null : beacon.id)}
+                        onClick={() => setSelectedBeacon(selectedBeacon === beaconId ? null : beaconId)}
                       >
                         <div style={{ fontSize: '14px' }}>
                           <strong>{beacon.name}</strong><br />
