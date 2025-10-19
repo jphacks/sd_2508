@@ -329,7 +329,7 @@ export default function Mode1Indoor() {
       const alert: Alert = {
         id: alertId,
         type: "exit_room",
-        message: `${device.userName || device.deviceId} が部屋から出ました！`,
+        message: `${device.userName || device.deviceId} が部屋から出たようです！`,
         deviceId: device.devEUI,
         deviceName: device.userName,
         timestamp: new Date().toISOString(),
@@ -707,34 +707,51 @@ export default function Mode1Indoor() {
 
       {alerts.length > 0 && (
         <div className="alert-stack">
-          {alerts.map((alert) => (
-            <div key={alert.id} className="alert alert-danger">
+          {alerts.map((alert) => {
+            // アラートタイプに応じて背景色とアイコンを変更
+            const isShock = alert.type === "shock";
+            const alertStyle = {
+              backgroundColor: isShock ? "#dc3545" : "#ff6b35", // 衝撃: 濃い赤、退室: オレンジ
+              border: isShock ? "3px solid #a71d2a" : "3px solid #cc5529",
+              animation: isShock ? "pulse 0.5s ease-in-out infinite" : "none",
+            };
+            const alertIcon = isShock ? "💥 衝撃検知" : "🚪 部屋退室";
+            
+            return (
               <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
+                key={alert.id}
+                className="alert alert-danger"
+                style={alertStyle}
               >
-                <div>
-                  <strong>⚠️ 警告</strong>
-                  <p style={{ marginTop: "8px" }}>{alert.message}</p>
-                </div>
-                <button
-                  onClick={() => dismissAlert(alert.id)}
+                <div
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    color: "white",
-                    fontSize: "24px",
-                    cursor: "pointer",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                   }}
                 >
-                  ×
-                </button>
+                  <div>
+                    <strong style={{ fontSize: "18px" }}>{alertIcon}</strong>
+                    <p style={{ marginTop: "8px", fontSize: "16px" }}>
+                      {alert.message}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => dismissAlert(alert.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "white",
+                      fontSize: "24px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

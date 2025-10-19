@@ -375,6 +375,15 @@ tbody tr:hover {
   }
 }
 
+@keyframes pulse {
+  0%, 100% {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 4px 30px rgba(220, 53, 69, 0.8), 0 0 20px rgba(220, 53, 69, 0.5);
+  }
+}
+
 .alert-danger {
   background-color: var(--danger-color);
   color: white;
