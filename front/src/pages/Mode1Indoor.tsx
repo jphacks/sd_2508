@@ -325,8 +325,9 @@ export default function Mode1Indoor() {
     });
 
     if (!isInside) {
+      const alertId = `exit_room-${device.devEUI}`;
       const alert: Alert = {
-        id: `alert-${Date.now()}`,
+        id: alertId,
         type: "exit_room",
         message: `${device.userName || device.deviceId} が部屋から出ました！`,
         deviceId: device.devEUI,
@@ -335,17 +336,25 @@ export default function Mode1Indoor() {
         dismissed: false,
       };
 
-      setAlerts((prev) => [...prev, alert]);
+      let shouldScheduleCleanup = false;
+      setAlerts((prev) => {
+        if (prev.some((a) => a.id === alertId)) {
+          return prev;
+        }
+        shouldScheduleCleanup = true;
+        return [...prev, alert];
+      });
 
-      // アラート音を鳴らす
-      if (audioRef.current) {
-        audioRef.current.play();
+      if (shouldScheduleCleanup) {
+        if (audioRef.current) {
+          audioRef.current.play();
+        }
+
+        // 5秒後に自動で消す
+        setTimeout(() => {
+          setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+        }, 5000);
       }
-
-      // 5秒後に自動で消す
-      setTimeout(() => {
-        setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
-      }, 5000);
     }
   };
 
@@ -696,34 +705,38 @@ export default function Mode1Indoor() {
         </h2>
       </div>
 
-      {alerts.map((alert) => (
-        <div key={alert.id} className="alert alert-danger">
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <strong>⚠️ 警告</strong>
-              <p style={{ marginTop: "8px" }}>{alert.message}</p>
+      {alerts.length > 0 && (
+        <div className="alert-stack">
+          {alerts.map((alert) => (
+            <div key={alert.id} className="alert alert-danger">
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  <strong>⚠️ 警告</strong>
+                  <p style={{ marginTop: "8px" }}>{alert.message}</p>
+                </div>
+                <button
+                  onClick={() => dismissAlert(alert.id)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "white",
+                    fontSize: "24px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => dismissAlert(alert.id)}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "white",
-                fontSize: "24px",
-                cursor: "pointer",
-              }}
-            >
-              ×
-            </button>
-          </div>
+          ))}
         </div>
-      ))}
+      )}
 
       <div
         style={{
