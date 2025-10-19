@@ -997,7 +997,7 @@ export default function Calibration() {
       if (isEditMode && roomId) {
         // 編集モード：既存のドキュメントを更新
         await updateDoc(doc(db, 'rooms', roomId), roomProfile);
-        alert(`「${roomName}」の家具配置が更新されました！`);
+        // alert(`「${roomName}」の家具配置が更新されました！`);
         
         // 家具編集モードの場合は EditRoom に戻る
         if (isFurnitureEditMode) {

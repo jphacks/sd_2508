@@ -306,10 +306,16 @@ export default function Mode1Indoor() {
         const furnitureColor = furnitureType?.color || '#95a5a6';
         
         ctx.fillStyle = furnitureColor;
-        const x = padding + furniture.position.x * scale;
-        const y = padding + furniture.position.y * scale;
-        const w = (furniture.width || 1) * scale;
-        const h = (furniture.height || 1) * scale;
+        // 正規化座標（0-1）× ルームサイズ = 実際のメートル位置
+        const furnitureX = furniture.position.x * roomProfile.outline!.width;
+        const furnitureY = furniture.position.y * roomProfile.outline!.height;
+        const furnitureW = furniture.width * roomProfile.outline!.width;
+        const furnitureH = furniture.height * roomProfile.outline!.height;
+        
+        const x = padding + furnitureX * scale;
+        const y = padding + furnitureY * scale;
+        const w = furnitureW * scale;
+        const h = furnitureH * scale;
         
         ctx.fillRect(x, y, w, h);
         
@@ -335,8 +341,13 @@ export default function Mode1Indoor() {
       console.log('Drawing devices:', devicePositions.size);
       devicePositions.forEach((position, deviceId) => {
         const device = devices.find(d => d.devEUI === deviceId);
-        const x = padding + position.x * scale;
-        const y = padding + position.y * scale;
+        
+        // 位置座標を変換：正規化座標（0-1）× ルームサイズ（メートル）
+        const displayX = position.x * roomProfile.outline!.width;
+        const displayY = position.y * roomProfile.outline!.height;
+        
+        const x = padding + displayX * scale;
+        const y = padding + displayY * scale;
 
         // デバイスの影
         ctx.beginPath();
@@ -388,11 +399,11 @@ export default function Mode1Indoor() {
         ctx.fillStyle = '#2c3e50';
         ctx.fillText(deviceName, x, y - 30);
 
-        // 位置座標
+        // 位置座標（正規化座標 × ルームサイズ = 実際のメートル位置）
         ctx.font = '10px sans-serif';
         ctx.fillStyle = '#7f8c8d';
         ctx.fillText(
-          `(${position.x.toFixed(1)}, ${position.y.toFixed(1)})`, 
+          `(${displayX.toFixed(1)}m, ${displayY.toFixed(1)}m)`, 
           x, 
           y + 25
         );

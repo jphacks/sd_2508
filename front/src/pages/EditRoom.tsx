@@ -102,7 +102,7 @@ export default function EditRoom() {
           className="btn btn-outline"
           onClick={() => navigate('/management')}
         >
-          ← 一覧に戻る
+          戻る
         </button>
       </div>
 
