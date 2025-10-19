@@ -25,7 +25,6 @@ export default function Mode1Indoor() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [alertOnExit, setAlertOnExit] = useState(true);
-  const [alertSound, setAlertSound] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -377,12 +376,15 @@ export default function Mode1Indoor() {
 
     // 家具を描画（中間層）
     if (roomProfile.furniture && roomProfile.furniture.length > 0) {
-      console.log("Drawing furniture:", roomProfile.furniture.length);
-      roomProfile.furniture.forEach((furniture) => {
-        const furnitureType =
-          FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
-        const furnitureColor = furnitureType?.color || "#95a5a6";
-
+      console.log('Drawing furniture:', roomProfile.furniture.length);
+      roomProfile.furniture.forEach(furniture => {
+        if (furniture.type === 'door') {
+          // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
+          return;
+        }
+        const furnitureType = FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
+        const furnitureColor = furnitureType?.color || '#95a5a6';
+        
         ctx.fillStyle = furnitureColor;
         // 正規化座標（0-1）× ルームサイズ = 実際のメートル位置
         const furnitureX = furniture.position.x * roomProfile.outline!.width;
@@ -771,38 +773,6 @@ export default function Mode1Indoor() {
                   }}
                 />
                 {alertOnExit ? "有効" : "無効"}
-              </button>
-            </div>
-            <div className="form-group">
-              <label className="form-label">警告音</label>
-              <button
-                onClick={() => setAlertSound(!alertSound)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 16px",
-                  borderRadius: "20px",
-                  border: "none",
-                  fontSize: "14px",
-                  fontWeight: "500",
-                  cursor: "pointer",
-                  transition: "all 0.3s ease",
-                  backgroundColor: alertSound ? "#50C878" : "#E0E0E0",
-                  color: alertSound ? "white" : "#666",
-                }}
-              >
-                <div
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    backgroundColor: "white",
-                    transition: "transform 0.3s ease",
-                    transform: alertSound ? "translateX(0)" : "translateX(0)",
-                  }}
-                />
-                {alertSound ? "有効" : "無効"}
               </button>
             </div>
           </div>
