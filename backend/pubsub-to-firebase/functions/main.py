@@ -84,6 +84,7 @@ def decode_t1000_hex(hexstr: str) -> dict:
 
     fid = b[0]
     out = {"frame_id": fid, "length": len(b), "hex": hexstr.lower()}
+    print(f"[INFO] T1000 {hexstr} frame_id=0x{fid:02x} length={len(b)}")
 
     if fid == 0x08 and len(b) >= 35:
         event_status = (b[1] << 16) | (b[2] << 8) | b[3]
