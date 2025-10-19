@@ -200,29 +200,85 @@ export default function Mode1Indoor() {
 
                 console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
 
-                // ハイブリッド位置推定（Fingerprinting + 三辺測量）
-                const position = estimatePositionHybrid(
-                  rssiMap,
-                  roomData.calibrationPoints,
-                  beaconPositions.length >= 3 ? beaconPositions : undefined
-                );
+                // 特定のビーコンのRSSI合計で部屋外判定
+                const beacon1Mac = "C3000042ADFA";
+                const beacon2Mac = "C3000042ADFA"; // 同じMACアドレスが2つ指定されていますが、そのまま実装
+                const rssi1 = rssiMap[beacon1Mac] || 0;
+                const rssi2 = rssiMap[beacon2Mac] || 0;
+                const rssiSum = rssi1 + rssi2;
+                const RSSI_THRESHOLD = -160;
 
-                if (position) {
-                  setDevicePositions((prev) => {
-                    const newMap = new Map(prev);
-                    newMap.set(device.devEUI, { x: position.x, y: position.y });
-                    return newMap;
-                  });
+                console.log(`📡 ${device.deviceId} RSSI閾値チェック:`, {
+                  beacon1: beacon1Mac,
+                  rssi1,
+                  beacon2: beacon2Mac,
+                  rssi2,
+                  rssiSum,
+                  threshold: RSSI_THRESHOLD,
+                  isOutside: rssiSum < RSSI_THRESHOLD
+                });
 
-                  // 部屋の外に出たかチェック
-                  checkRoomExit(device, position, roomData);
-
-                  // デバッグ用にメソッド情報を表示（オプション）
-                  console.log(
-                    `${device.deviceId}: ${position.method} (信頼度: ${(
-                      position.confidence * 100
-                    ).toFixed(1)}%)`
+                // RSSI閾値を下回った場合、部屋外判定
+                if (rssiSum < RSSI_THRESHOLD) {
+                  // ドアの外側位置を取得
+                  const doorOutside = roomData.calibrationPoints.find(
+                    (p) => p.id === "door_outside"
                   );
+
+                  if (doorOutside) {
+                    const outsidePosition = {
+                      x: doorOutside.position.x,
+                      y: doorOutside.position.y
+                    };
+
+                    console.log(`🚪 ${device.deviceId} 部屋外判定（RSSI閾値）:`, {
+                      rssiSum,
+                      threshold: RSSI_THRESHOLD,
+                      doorOutsidePosition: outsidePosition
+                    });
+
+                    // ドア外側の位置に固定
+                    setDevicePositions((prev) => {
+                      const newMap = new Map(prev);
+                      newMap.set(device.devEUI, outsidePosition);
+                      return newMap;
+                    });
+
+                    // 部屋外アラートを発報
+                    checkRoomExit(device, outsidePosition, roomData, true);
+                  }
+                } else {
+                  // RSSI閾値を上回っている場合、通常の位置推定を実行
+                  const position = estimatePositionHybrid(
+                    rssiMap,
+                    roomData.calibrationPoints,
+                    beaconPositions.length >= 3 ? beaconPositions : undefined
+                  );
+
+                  if (position) {
+                    console.log(`📍 ${device.deviceId} 位置推定結果:`, {
+                      position: { x: position.x.toFixed(2), y: position.y.toFixed(2) },
+                      method: position.method,
+                      confidence: `${(position.confidence * 100).toFixed(1)}%`,
+                      rssiCount: Object.keys(rssiMap).length
+                    });
+
+                    setDevicePositions((prev) => {
+                      const newMap = new Map(prev);
+                      newMap.set(device.devEUI, { x: position.x, y: position.y });
+                      return newMap;
+                    });
+
+                    // 部屋の外に出たかチェック（通常判定）
+                    checkRoomExit(device, position, roomData, false);
+
+                    // デバッグ用にメソッド情報を表示（オプション）
+                    console.log(
+                      `${device.deviceId}: ${position.method} (信頼度: ${(
+                        position.confidence * 100
+                      ).toFixed(1)}%)`
+                    );
+                  }
                 }
               }
             });
@@ -240,37 +296,65 @@ export default function Mode1Indoor() {
   const checkRoomExit = (
     device: Device,
     position: { x: number; y: number },
-    room: RoomProfile
+    room: RoomProfile,
+    forceOutside: boolean = false
   ) => {
     const margin = 0.5;
-    const isInside =
+    const isInside = forceOutside ? false : (
       position.x >= -margin &&
       position.x <= room.outline!.width + margin &&
       position.y >= -margin &&
-      position.y <= room.outline!.height + margin;
+      position.y <= room.outline!.height + margin
+    );
+
+    console.log(`🔍 ${device.deviceId} 部屋チェック:`, {
+      position: { x: position.x.toFixed(2), y: position.y.toFixed(2) },
+      roomBounds: { 
+        width: room.outline!.width, 
+        height: room.outline!.height 
+      },
+      margin,
+      isInside,
+      forceOutside,
+      checks: {
+        xMin: position.x >= -margin,
+        xMax: position.x <= room.outline!.width + margin,
+        yMin: position.y >= -margin,
+        yMax: position.y <= room.outline!.height + margin
+      }
+    });
 
     if (!isInside) {
+      const alertId = `exit_room-${device.devEUI}`;
       const alert: Alert = {
-        id: `alert-${Date.now()}`,
+        id: alertId,
         type: "exit_room",
-        message: `${device.userName || device.deviceId} が部屋から出ました！`,
+        message: `${device.userName || device.deviceId} が部屋から出たようです！`,
         deviceId: device.devEUI,
         deviceName: device.userName,
         timestamp: new Date().toISOString(),
         dismissed: false,
       };
 
-      setAlerts((prev) => [...prev, alert]);
+      let shouldScheduleCleanup = false;
+      setAlerts((prev) => {
+        if (prev.some((a) => a.id === alertId)) {
+          return prev;
+        }
+        shouldScheduleCleanup = true;
+        return [...prev, alert];
+      });
 
-      // アラート音を鳴らす
-      if (audioRef.current) {
-        audioRef.current.play();
+      if (shouldScheduleCleanup) {
+        if (audioRef.current) {
+          audioRef.current.play();
+        }
+
+        // 5秒後に自動で消す
+        setTimeout(() => {
+          setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+        }, 5000);
       }
-
-      // 5秒後に自動で消す
-      setTimeout(() => {
-        setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
-      }, 5000);
     }
   };
 
@@ -378,8 +462,8 @@ export default function Mode1Indoor() {
     if (roomProfile.furniture && roomProfile.furniture.length > 0) {
       console.log('Drawing furniture:', roomProfile.furniture.length);
       roomProfile.furniture.forEach(furniture => {
-        if (furniture.type === 'door') {
-          // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
+        // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
+        if (furniture.type === 'door' as any) {
           return;
         }
         const furnitureType = FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
@@ -621,34 +705,55 @@ export default function Mode1Indoor() {
         </h2>
       </div>
 
-      {alerts.map((alert) => (
-        <div key={alert.id} className="alert alert-danger">
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <strong>⚠️ 警告</strong>
-              <p style={{ marginTop: "8px" }}>{alert.message}</p>
-            </div>
-            <button
-              onClick={() => dismissAlert(alert.id)}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "white",
-                fontSize: "24px",
-                cursor: "pointer",
-              }}
-            >
-              ×
-            </button>
-          </div>
+      {alerts.length > 0 && (
+        <div className="alert-stack">
+          {alerts.map((alert) => {
+            // アラートタイプに応じて背景色とアイコンを変更
+            const isShock = alert.type === "shock";
+            const alertStyle = {
+              backgroundColor: isShock ? "#dc3545" : "#ff6b35", // 衝撃: 濃い赤、退室: オレンジ
+              border: isShock ? "3px solid #a71d2a" : "3px solid #cc5529",
+              animation: isShock ? "pulse 0.5s ease-in-out infinite" : "none",
+            };
+            const alertIcon = isShock ? "💥 衝撃検知" : "🚪 部屋退室";
+            
+            return (
+              <div
+                key={alert.id}
+                className="alert alert-danger"
+                style={alertStyle}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: "18px" }}>{alertIcon}</strong>
+                    <p style={{ marginTop: "8px", fontSize: "16px" }}>
+                      {alert.message}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => dismissAlert(alert.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "white",
+                      fontSize: "24px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      ))}
+      )}
 
       <div
         style={{
