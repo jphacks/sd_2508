@@ -1551,6 +1551,22 @@ export default function Calibration() {
                   </p>
                 </div>
 
+                {/* 測定姿勢の指示 */}
+                <div style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px', 
+                  backgroundColor: '#E8F5E9', 
+                  borderRadius: '6px',
+                  border: '1px solid #4CAF50'
+                }}>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#2E7D32' }}>
+                    <strong>測定時の姿勢:</strong><br />
+                    • トラッカーを胸の高さで持ってください<br />
+                    • <strong>🚪 出口の方を向いて</strong>測定してください<br />
+                    • 測定中は動かないでください
+                  </p>
+                </div>
+
                 <div className="form-group">
                   <label className="form-label">測定に使用するトラッカー</label>
                   <select
