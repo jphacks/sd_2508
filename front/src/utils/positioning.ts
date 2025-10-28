@@ -284,8 +284,8 @@ export function smoothRSSI(values: number[], windowSize: number = 3): number {
 }
 
 /**
- * ハイブリッド位置推定（Fingerprinting + 三辺測量の自動重み付け併用）
- * 両手法の信頼度に基づいて自動的に重み付けを調整
+ * ハイブリッド位置推定（Fingerprinting法のみ使用）
+ * 指紋法によるキャリブレーションデータベースの位置推定
  */
 export function estimatePositionHybrid(
   currentRssi: { [beaconId: string]: number },
@@ -300,72 +300,11 @@ export function estimatePositionHybrid(
     calibrationPoints
   );
   
-  // 三辺測量法で推定（ビーコン位置情報がある場合のみ）
-  let trilaterationResult: { x: number; y: number; confidence: number } | null = null;
-  if (beaconPositions && beaconPositions.length >= 3) {
-    trilaterationResult = estimatePositionByTrilateration(
-      beaconPositions,
-      currentRssi,
-      referenceRssi
-    );
-  }
-  
-  // 両方の結果がある場合は重み付け平均
-  if (fingerprintResult && trilaterationResult) {
-    const fpConfidence = fingerprintResult.confidence;
-    const triConfidence = trilaterationResult.confidence;
-    
-    // キャリブレーション点の数に応じて基本重みを調整
-    const calibrationBonus = Math.min(0.2, calibrationPoints.length / 50);
-    const adjustedFpConfidence = fpConfidence + calibrationBonus;
-    
-    // 両者の結果の一貫性をチェック
-    const distance = Math.sqrt(
-      Math.pow(fingerprintResult.x - trilaterationResult.x, 2) + 
-      Math.pow(fingerprintResult.y - trilaterationResult.y, 2)
-    );
-    
-    // 一貫性が高い場合は両方の信頼度を上げる
-    const consistencyBonus = distance < 1.0 ? 0.15 : (distance < 2.0 ? 0.05 : 0);
-    const finalFpConfidence = adjustedFpConfidence + consistencyBonus;
-    const finalTriConfidence = triConfidence + consistencyBonus;
-    
-    const totalConfidence = finalFpConfidence + finalTriConfidence;
-    
-    // 重み付け平均で最終位置を計算
-    const x = (fingerprintResult.x * finalFpConfidence + 
-               trilaterationResult.x * finalTriConfidence) / totalConfidence;
-    const y = (fingerprintResult.y * finalFpConfidence + 
-               trilaterationResult.y * finalTriConfidence) / totalConfidence;
-    
-    // 最終的な信頼度
-    const finalConfidence = Math.min(1, (finalFpConfidence + finalTriConfidence) / 2);
-    
-    // 重みの割合を計算（デバッグ用）
-    const fpPercent = Math.round((finalFpConfidence / totalConfidence) * 100);
-    const triPercent = Math.round((finalTriConfidence / totalConfidence) * 100);
-    
-    return {
-      x,
-      y,
-      confidence: finalConfidence,
-      method: `Hybrid (FP:${fpPercent}% TRI:${triPercent}%)`
-    };
-  }
-  
-  // Fingerprintingのみ使用可能
+  // Fingerprintingの結果を返す
   if (fingerprintResult) {
     return { 
       ...fingerprintResult, 
-      method: 'Fingerprinting Only' 
-    };
-  }
-  
-  // 三辺測量のみ使用可能
-  if (trilaterationResult) {
-    return { 
-      ...trilaterationResult, 
-      method: 'Trilateration Only' 
+      method: 'Fingerprinting' 
     };
   }
   
