@@ -349,8 +349,10 @@ export default function Mode1Indoor() {
                     const normalizedVectorY = doorVectorY / doorVectorLength;
                     
                     // ドアの中心からメートル単位に変換
-                    const doorCenterMeterX = doorCenterX * roomData.outline!.width;
-                    const doorCenterMeterY = doorCenterY * roomData.outline!.height;
+                    const outlineWidth = roomData.outline?.width ?? 1;
+                    const outlineHeight = roomData.outline?.height ?? 1;
+                    const doorCenterMeterX = doorCenterX * outlineWidth;
+                    const doorCenterMeterY = doorCenterY * outlineHeight;
                     
                     // 退室スペースの距離（ドア中心から1.5m外側）
                     const exitSpaceDistance = 1.5;
@@ -360,9 +362,9 @@ export default function Mode1Indoor() {
                       const margin = 0.5;
                       return !(
                         pos.x >= -margin &&
-                        pos.x <= roomData.outline!.width + margin &&
+                        pos.x <= outlineWidth + margin &&
                         pos.y >= -margin &&
-                        pos.y <= roomData.outline!.height + margin
+                        pos.y <= outlineHeight + margin
                       );
                     });
                     
@@ -408,20 +410,31 @@ export default function Mode1Indoor() {
 
                   if (position) {
                     console.log(`📍 ${device.deviceId} 位置推定結果:`, {
-                      position: { x: position.x.toFixed(2), y: position.y.toFixed(2) },
+                      normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
                       method: position.method,
                       confidence: `${(position.confidence * 100).toFixed(1)}%`,
                       rssiCount: Object.keys(rssiMap).length
                     });
 
+                    const outlineWidth = roomData.outline?.width ?? 1;
+                    const outlineHeight = roomData.outline?.height ?? 1;
+                    const actualPosition = {
+                      x: position.x * outlineWidth,
+                      y: position.y * outlineHeight
+                    };
+                    console.log(`📍 ${device.deviceId} 実座標換算:`, {
+                      position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
+                      roomSize: { width: outlineWidth, height: outlineHeight }
+                    });
+
                     setDevicePositions((prev) => {
                       const newMap = new Map(prev);
-                      newMap.set(device.devEUI, { x: position.x, y: position.y });
+                      newMap.set(device.devEUI, actualPosition);
                       return newMap;
                     });
 
                     // 部屋の外に出たかチェック（通常判定）
-                    checkRoomExit(device, position, roomData, false);
+                    checkRoomExit(device, actualPosition, roomData, false);
 
                     // デバッグ用にメソッド情報を表示（オプション）
                     console.log(
@@ -451,27 +464,29 @@ export default function Mode1Indoor() {
     forceOutside: boolean = false
   ) => {
     const margin = 0.5;
+    const outlineWidth = room.outline?.width ?? 1;
+    const outlineHeight = room.outline?.height ?? 1;
     const isInside = forceOutside ? false : (
       position.x >= -margin &&
-      position.x <= room.outline!.width + margin &&
+      position.x <= outlineWidth + margin &&
       position.y >= -margin &&
-      position.y <= room.outline!.height + margin
+      position.y <= outlineHeight + margin
     );
 
     console.log(`🔍 ${device.deviceId} 部屋チェック:`, {
       position: { x: position.x.toFixed(2), y: position.y.toFixed(2) },
       roomBounds: { 
-        width: room.outline!.width, 
-        height: room.outline!.height 
+        width: outlineWidth, 
+        height: outlineHeight 
       },
       margin,
       isInside,
       forceOutside,
       checks: {
         xMin: position.x >= -margin,
-        xMax: position.x <= room.outline!.width + margin,
+        xMax: position.x <= outlineWidth + margin,
         yMin: position.y >= -margin,
-        yMax: position.y <= room.outline!.height + margin
+        yMax: position.y <= outlineHeight + margin
       }
     });
 
@@ -564,8 +579,10 @@ export default function Mode1Indoor() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const exitSpaceDepth = 2.0; // 奥行き1m
-    const exitSpaceWidth = 2.0; // 横幅1m
+    const roomWidth = roomProfile.outline?.width ?? 1;
+    const roomHeight = roomProfile.outline?.height ?? 1;
+    const exitSpaceDepth = 1.0; // 奥行き1m
+    const exitSpaceWidth = 1.0; // 横幅1m
 
     // 退室スペースを含めた描画範囲を計算
     const exitSpaceMargin = exitSpaceDepth;
@@ -574,29 +591,44 @@ export default function Mode1Indoor() {
     // ドアの位置から退室スペースの方向を計算
     const doorOutside = roomProfile.calibrationPoints?.find(p => p.id === "door_outside");
     const doorInside = roomProfile.calibrationPoints?.find(p => p.id === "door_inside");
-    
-    let totalWidth = roomProfile.outline!.width;
-    let totalHeight = roomProfile.outline!.height;
+    let totalWidth = roomWidth;
+    let totalHeight = roomHeight;
     let offsetX = 0;
     let offsetY = 0;
+    let doorInsideActual: { x: number; y: number } | null = null;
+    let doorOutsideActual: { x: number; y: number } | null = null;
+    let doorNormal: { x: number; y: number } | null = null;
     
     if (doorOutside && doorInside) {
-      // ドアの向きベクトル
-      const doorVectorX = doorOutside.position.x - doorInside.position.x;
-      const doorVectorY = doorOutside.position.y - doorInside.position.y;
-      const doorVectorLength = Math.sqrt(doorVectorX * doorVectorX + doorVectorY * doorVectorY);
-      const normalizedVectorX = doorVectorX / doorVectorLength;
-      const normalizedVectorY = doorVectorY / doorVectorLength;
+      doorInsideActual = {
+        x: doorInside.position.x * roomWidth,
+        y: doorInside.position.y * roomHeight
+      };
+      doorOutsideActual = {
+        x: doorOutside.position.x * roomWidth,
+        y: doorOutside.position.y * roomHeight
+      };
+
+      // ドアの向きベクトル（実寸）
+      const doorVectorX = doorOutsideActual.x - doorInsideActual.x;
+      const doorVectorY = doorOutsideActual.y - doorInsideActual.y;
+      const doorVectorLength = Math.hypot(doorVectorX, doorVectorY) || 1;
+      doorNormal = {
+        x: doorVectorX / doorVectorLength,
+        y: doorVectorY / doorVectorLength
+      };
       
-      // 退室スペースの最大範囲を計算
-      const maxExitX = doorOutside.position.x + normalizedVectorX * exitSpaceMargin;
-      const maxExitY = doorOutside.position.y + normalizedVectorY * exitSpaceMargin;
+      // 退室スペースの最大範囲を計算（実寸）
+      const maxExitX = doorOutsideActual.x + doorNormal.x * exitSpaceMargin;
+      const maxExitY = doorOutsideActual.y + doorNormal.y * exitSpaceMargin;
+      const minExitX = doorOutsideActual.x - doorNormal.x * exitSpaceMargin;
+      const minExitY = doorOutsideActual.y - doorNormal.y * exitSpaceMargin;
       
-      // 全体の描画範囲を計算
-      const minX = Math.min(0, maxExitX);
-      const minY = Math.min(0, maxExitY);
-      const maxX = Math.max(roomProfile.outline!.width, maxExitX);
-      const maxY = Math.max(roomProfile.outline!.height, maxExitY);
+      // 全体の描画範囲を計算（実寸）
+      const minX = Math.min(0, doorInsideActual.x, doorOutsideActual.x, minExitX, maxExitX);
+      const minY = Math.min(0, doorInsideActual.y, doorOutsideActual.y, minExitY, maxExitY);
+      const maxX = Math.max(roomWidth, doorInsideActual.x, doorOutsideActual.x, minExitX, maxExitX);
+      const maxY = Math.max(roomHeight, doorInsideActual.y, doorOutsideActual.y, minExitY, maxExitY);
       
       totalWidth = maxX - minX;
       totalHeight = maxY - minY;
@@ -627,32 +659,20 @@ export default function Mode1Indoor() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     // 退室スペースの背景を描画（薄い赤色）
-    if (doorOutside && doorInside) {
+    if (doorInsideActual && doorOutsideActual && doorNormal) {
       ctx.fillStyle = "rgba(255, 107, 53, 0.1)";
       
       // ドアの中心位置を計算（ドアの描画と同じ位置）
-      const doorCenterX = (doorInside.position.x + doorOutside.position.x) / 2;
-      const doorCenterY = (doorInside.position.y + doorOutside.position.y) / 2;
-      
-      const doorVectorX = doorOutside.position.x - doorInside.position.x;
-      const doorVectorY = doorOutside.position.y - doorInside.position.y;
-      const doorVectorLength = Math.sqrt(doorVectorX * doorVectorX + doorVectorY * doorVectorY);
-      const normalizedVectorX = doorVectorX / doorVectorLength;
-      const normalizedVectorY = doorVectorY / doorVectorLength;
-      
-      // 退室スペースの矩形を描画
+      const doorCenterX = (doorInsideActual.x + doorOutsideActual.x) / 2;
+      const doorCenterY = (doorInsideActual.y + doorOutsideActual.y) / 2;
       const doorThickness = 0.05;
 
-      // ドアの中心からメートル単位に変換（offsetを考慮）
-      const doorDisplayX = doorCenterX * roomProfile.outline!.width;
-      const doorDisplayY = doorCenterY * roomProfile.outline!.height;
-      
-      const exitX = (doorDisplayX + offsetX) * scale + padding;
-      const exitY = (doorDisplayY + offsetY) * scale + padding;
+      const exitX = (doorCenterX + offsetX) * scale + padding;
+      const exitY = (doorCenterY + offsetY) * scale + padding;
       
       ctx.save();
       ctx.translate(exitX, exitY);
-      const angle = Math.atan2(doorVectorY, doorVectorX);
+      const angle = Math.atan2(doorNormal.y, doorNormal.x);
       ctx.rotate(angle);
       
       ctx.fillRect(
@@ -670,8 +690,8 @@ export default function Mode1Indoor() {
       const labelDistance = (exitSpaceDepth / 2 + doorThickness / 2) * scale;
       ctx.fillText(
         "退室スペース",
-        exitX + normalizedVectorX * labelDistance,
-        exitY + normalizedVectorY * labelDistance
+        exitX + doorNormal.x * labelDistance,
+        exitY + doorNormal.y * labelDistance
       );
     }
 
@@ -681,26 +701,26 @@ export default function Mode1Indoor() {
     ctx.strokeRect(
       padding + offsetX * scale,
       padding + offsetY * scale,
-      roomProfile.outline!.width * scale,
-      roomProfile.outline!.height * scale
+      roomWidth * scale,
+      roomHeight * scale
     );
 
     // グリッド線（最背面）
     ctx.strokeStyle = "#e1e8ed";
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
-    for (let i = 1; i < roomProfile.outline!.width; i++) {
+    for (let i = 1; i < roomWidth; i++) {
       const x = padding + (i + offsetX) * scale;
       ctx.beginPath();
       ctx.moveTo(x, padding + offsetY * scale);
-      ctx.lineTo(x, padding + (roomProfile.outline!.height + offsetY) * scale);
+      ctx.lineTo(x, padding + (roomHeight + offsetY) * scale);
       ctx.stroke();
     }
-    for (let i = 1; i < roomProfile.outline!.height; i++) {
+    for (let i = 1; i < roomHeight; i++) {
       const y = padding + (i + offsetY) * scale;
       ctx.beginPath();
       ctx.moveTo(padding + offsetX * scale, y);
-      ctx.lineTo(padding + (roomProfile.outline!.width + offsetX) * scale, y);
+      ctx.lineTo(padding + (roomWidth + offsetX) * scale, y);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -718,10 +738,10 @@ export default function Mode1Indoor() {
         
         ctx.fillStyle = furnitureColor;
         // 正規化座標（0-1）× ルームサイズ = 実際のメートル位置
-        const furnitureX = furniture.position.x * roomProfile.outline!.width;
-        const furnitureY = furniture.position.y * roomProfile.outline!.height;
-        const furnitureW = furniture.width * roomProfile.outline!.width;
-        const furnitureH = furniture.height * roomProfile.outline!.height;
+        const furnitureX = furniture.position.x * roomWidth;
+        const furnitureY = furniture.position.y * roomHeight;
+        const furnitureW = furniture.width * roomWidth;
+        const furnitureH = furniture.height * roomHeight;
 
         const x = padding + (furnitureX + offsetX) * scale;
         const y = padding + (furnitureY + offsetY) * scale;
@@ -765,34 +785,24 @@ export default function Mode1Indoor() {
       );
 
       if (doorInside && doorOutside) {
+        const doorInsideActual = {
+          x: doorInside.position.x * roomWidth,
+          y: doorInside.position.y * roomHeight
+        };
+        const doorOutsideActual = {
+          x: doorOutside.position.x * roomWidth,
+          y: doorOutside.position.y * roomHeight
+        };
+
         // ドアの中心位置を計算
         const doorCenterX =
-          (doorInside.position.x + doorOutside.position.x) / 2;
+          (doorInsideActual.x + doorOutsideActual.x) / 2;
         const doorCenterY =
-          (doorInside.position.y + doorOutside.position.y) / 2;
+          (doorInsideActual.y + doorOutsideActual.y) / 2;
 
         // ドアの向きを計算（内側→外側のベクトル）
-        const doorVectorX = doorOutside.position.x - doorInside.position.x;
-        const doorVectorY = doorOutside.position.y - doorInside.position.y;
-        const doorAngle = Math.atan2(doorVectorY, doorVectorX);
-
-        // ドアのサイズ（メートル単位）
-        const doorWidth = 0.9; // 0.9m幅
-        const doorThickness = 0.05; // 5cm厚
-
-        // メートル位置に変換（offsetを考慮）
-        const doorDisplayX = doorCenterX * roomProfile.outline!.width;
-        const doorDisplayY = doorCenterY * roomProfile.outline!.height;
-
-        const x = padding + (doorDisplayX + offsetX) * scale;
-        const y = padding + (doorDisplayY + offsetY) * scale;
-
-        // ドアを描画（回転を考慮）
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(doorAngle + Math.PI / 2); // ベクトルに垂直
-
-        ctx.restore();
+        const x = padding + (doorCenterX + offsetX) * scale;
+        const y = padding + (doorCenterY + offsetY) * scale;
 
         // ドアアイコンとラベル
         ctx.font = "bold 16px sans-serif";
