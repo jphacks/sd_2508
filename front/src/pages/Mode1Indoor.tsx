@@ -51,6 +51,18 @@ export default function Mode1Indoor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [showRssiOverlay, setShowRssiOverlay] = useState(false);
+  const [deviceBeaconSignals, setDeviceBeaconSignals] = useState<
+    Map<string, Array<{ name: string; rssi: number }>>
+  >(new Map());
+  const [infoIconPositions, setInfoIconPositions] = useState<
+    Map<string, { x: number; y: number; radius: number }>
+  >(new Map());
+  const [tooltip, setTooltip] = useState<{
+    deviceId: string;
+    left: number;
+    top: number;
+    signals: Array<{ name: string; rssi: number }>;
+  } | null>(null);
   const beaconNameMap = useMemo(() => {
     const map = new Map<string, { name: string; firestoreId: string }>();
     beacons.forEach((beacon) => {
@@ -264,6 +276,11 @@ export default function Mode1Indoor() {
                   mac: string;
                 }>;
 
+                const expectedBeaconByMac = new Map(
+                  expectedBeacons.map((beacon) => [beacon.mac, beacon])
+                );
+                const beaconSignals: Array<{ name: string; rssi: number }> = [];
+
                 data.beacons.forEach((beacon: any) => {
                   if (beacon.mac && beacon.rssi) {
                     // MACアドレスを正規化（コロン区切りを大文字に統一）
@@ -288,6 +305,17 @@ export default function Mode1Indoor() {
                           rssi: beacon.rssi,
                         });
                       }
+
+                      const beaconDisplayInfo =
+                        beaconNameMap.get(normalizedMac) ||
+                        expectedBeaconByMac.get(normalizedMac);
+                      beaconSignals.push({
+                        name:
+                          beaconDisplayInfo?.name ||
+                          beaconDisplayInfo?.beaconName ||
+                          normalizedMac,
+                        rssi: beacon.rssi,
+                      });
                     }
                   }
                 });
@@ -571,6 +599,15 @@ export default function Mode1Indoor() {
                     );
                   }
                 }
+
+                setDeviceBeaconSignals((prev) => {
+                  const newMap = new Map(prev);
+                  const sortedSignals = beaconSignals.sort((a, b) =>
+                    a.name.localeCompare(b.name, "ja")
+                  );
+                  newMap.set(device.devEUI, sortedSignals);
+                  return newMap;
+                });
               }
             });
           });
@@ -690,6 +727,108 @@ export default function Mode1Indoor() {
       drawRoom();
     }
   }, [roomProfile, devicePositions, showRssiOverlay]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const canvasX = (event.clientX - rect.left) * scaleX;
+      const canvasY = (event.clientY - rect.top) * scaleY;
+
+      let hoveredDeviceId: string | null = null;
+      infoIconPositions.forEach((icon, deviceId) => {
+        const dx = canvasX - icon.x;
+        const dy = canvasY - icon.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance <= icon.radius) {
+          hoveredDeviceId = deviceId;
+        }
+      });
+
+      if (hoveredDeviceId) {
+        const icon = infoIconPositions.get(hoveredDeviceId);
+        if (!icon) return;
+
+        const containerRect =
+          canvas.parentElement?.getBoundingClientRect() ?? rect;
+        const scaleCssX = rect.width / canvas.width;
+        const scaleCssY = rect.height / canvas.height;
+        const left =
+          icon.x * scaleCssX + (rect.left - containerRect.left) + 12;
+        const top =
+          icon.y * scaleCssY + (rect.top - containerRect.top) - 12;
+        const signals = deviceBeaconSignals.get(hoveredDeviceId) || [];
+
+        setTooltip((prev) => {
+          if (
+            prev &&
+            prev.deviceId === hoveredDeviceId &&
+            Math.abs(prev.left - left) < 0.5 &&
+            Math.abs(prev.top - top) < 0.5
+          ) {
+            return prev;
+          }
+          return {
+            deviceId: hoveredDeviceId!,
+            left,
+            top,
+            signals,
+          };
+        });
+      } else {
+        setTooltip((prev) => (prev ? null : prev));
+      }
+    };
+
+    const handleMouseLeave = () => {
+      setTooltip(null);
+    };
+
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseleave", handleMouseLeave);
+
+    return () => {
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseleave", handleMouseLeave);
+    };
+  }, [infoIconPositions, deviceBeaconSignals]);
+
+  useEffect(() => {
+    if (!tooltip) return;
+    const signals = deviceBeaconSignals.get(tooltip.deviceId) || [];
+    setTooltip((prev) => {
+      if (!prev) return prev;
+      const sameLength = prev.signals.length === signals.length;
+      const sameContent =
+        sameLength &&
+        prev.signals.every(
+          (signal, index) =>
+            signal.name === signals[index]?.name &&
+            signal.rssi === signals[index]?.rssi
+        );
+      if (sameContent) {
+        return prev;
+      }
+      return { ...prev, signals };
+    });
+  }, [deviceBeaconSignals, tooltip]);
+
+  useEffect(() => {
+    if (tooltip && !infoIconPositions.has(tooltip.deviceId)) {
+      setTooltip(null);
+    }
+  }, [infoIconPositions, tooltip]);
+
+  const tooltipDevice = useMemo(() => {
+    if (!tooltip) return null;
+    return devices.find((device) => device.devEUI === tooltip.deviceId) || null;
+  }, [tooltip, devices]);
 
   const drawRoom = () => {
     const canvas = canvasRef.current;
@@ -1072,6 +1211,8 @@ export default function Mode1Indoor() {
       ctx.font = previousFont;
     }
 
+    const iconPositions = new Map<string, { x: number; y: number; radius: number }>();
+
     // デバイスの位置を描画（最前面）
     if (devicePositions.size > 0) {
       console.log("Drawing devices:", devicePositions.size);
@@ -1125,8 +1266,37 @@ export default function Mode1Indoor() {
 
         ctx.fillStyle = "#2c3e50";
         ctx.fillText(deviceName, x, y - 30);
+
+        const labelAlign = ctx.textAlign;
+        const labelBaseline = ctx.textBaseline;
+
+        const infoRadius = 8;
+        const infoOffset = textWidth / 2 + infoRadius + 6;
+        const infoX = x + infoOffset;
+        const infoY = y - 30;
+
+        ctx.beginPath();
+        ctx.arc(infoX, infoY, infoRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#34495e";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText("i", infoX, infoY);
+
+        ctx.textAlign = labelAlign;
+        ctx.textBaseline = labelBaseline;
+
+        iconPositions.set(deviceId, { x: infoX, y: infoY, radius: infoRadius + 4 });
       });
     }
+
+    setInfoIconPositions(iconPositions);
 
     console.log("Room drawing completed");
   };
@@ -1485,6 +1655,54 @@ export default function Mode1Indoor() {
                 borderRadius: "8px",
               }}
             />
+            {tooltip && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: tooltip.left,
+                  top: tooltip.top,
+                  transform: "translate(-50%, -100%)",
+                  backgroundColor: "rgba(44, 62, 80, 0.92)",
+                  color: "#ffffff",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  boxShadow: "0 8px 16px rgba(0, 0, 0, 0.15)",
+                  pointerEvents: "none",
+                  maxWidth: "220px",
+                  backdropFilter: "blur(4px)",
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: tooltip.signals.length > 0 ? "6px" : "0" }}>
+                  {tooltipDevice?.userName ||
+                    tooltipDevice?.deviceId ||
+                    tooltip.deviceId}
+                </div>
+                {tooltip.signals.length > 0 ? (
+                  <ul
+                    style={{
+                      padding: 0,
+                      margin: 0,
+                      listStyle: "none",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {tooltip.signals.map((signal) => (
+                      <li key={`${signal.name}-${signal.rssi}`}>
+                        <span style={{ fontWeight: 500 }}>{signal.name}</span>
+                        <span style={{ marginLeft: "8px", color: "#ecf0f1" }}>
+                          {signal.rssi} dBm
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span style={{ color: "rgba(255, 255, 255, 0.7)" }}>
+                    ビーコンを受信していません
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
