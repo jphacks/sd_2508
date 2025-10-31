@@ -108,7 +108,7 @@ function NavBar({ onLogout }: { onLogout: () => void }) {
         ホーム
       </Link>
       <Link to="/management" className={`nav-link ${isActive('/management') ? 'active' : ''}`}>
-        管理
+        デバイス管理
       </Link>
       <Link to="/calibration" className={`nav-link ${isActive('/calibration') ? 'active' : ''}`}>
         キャリブレーション

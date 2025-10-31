@@ -122,6 +122,7 @@ export default function Calibration() {
   const [step, setStep] = useState(0);
   const [roomName, setRoomName] = useState('');
   const [selectedBeacons, setSelectedBeacons] = useState<string[]>([]);
+  const [doorBeaconId, setDoorBeaconId] = useState<string>('');
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
@@ -234,6 +235,7 @@ export default function Calibration() {
         setOriginalRoomData(roomData);
         setRoomName(roomData.name);
         setSelectedBeacons(roomData.beacons || []);
+        setDoorBeaconId(roomData.doorBeaconId || '');
         setFurniture(roomData.furniture || []);
         setCalibrationPoints(roomData.calibrationPoints || []);
         setIsEditMode(true);
@@ -283,6 +285,24 @@ export default function Calibration() {
       } as Beacon & { firestoreId: string };
     });
     setBeacons(data);
+  };
+
+  useEffect(() => {
+    if (selectedBeacons.length === 0) {
+      if (doorBeaconId) {
+        setDoorBeaconId('');
+      }
+      return;
+    }
+
+    if (!doorBeaconId || !selectedBeacons.includes(doorBeaconId)) {
+      setDoorBeaconId(selectedBeacons[0]);
+    }
+  }, [selectedBeacons, doorBeaconId]);
+
+  const getBeaconDisplayName = (firestoreId: string) => {
+    const beacon = beacons.find(b => b.firestoreId === firestoreId);
+    return beacon?.name || beacon?.beaconId || firestoreId;
   };
 
   // ドア位置を部屋の外枠上にスナップする関数
@@ -808,6 +828,11 @@ export default function Calibration() {
       alert('ビーコンが選択されていません');
       return;
     }
+    
+    if (!doorBeaconId) {
+      alert('ドア付近のビーコンが選択されていません');
+      return;
+    }
 
     // 部屋サイズの処理：入力されていればメートル単位、なければundefined
     const parsedWidth = roomWidth ? parseFloat(roomWidth) : null;
@@ -851,6 +876,7 @@ export default function Calibration() {
     const roomProfile: Partial<RoomProfile> = {
       name: roomName,
       beacons: selectedBeacons,
+      doorBeaconId: doorBeaconId || null,
       calibrationPoints: calibrationPoints,
       outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
       furniture: furniture,
@@ -1387,10 +1413,34 @@ export default function Calibration() {
                 ))}
               </div>
             </div>
+            <div className="form-group">
+              <label className="form-label">ドア付近のビーコン *</label>
+              <select
+                className="form-input"
+                value={doorBeaconId}
+                onChange={(e) => setDoorBeaconId(e.target.value)}
+                disabled={selectedBeacons.length === 0}
+              >
+                {selectedBeacons.length === 0 && (
+                  <option value="">ビーコンを選択してください</option>
+                )}
+                {selectedBeacons.length > 0 && !doorBeaconId && (
+                  <option value="">ビーコンを選択してください</option>
+                )}
+                {selectedBeacons.map(id => (
+                  <option key={id} value={id}>
+                    {getBeaconDisplayName(id)}
+                  </option>
+                ))}
+              </select>
+              <p style={{ marginTop: '8px', fontSize: '12px', color: '#7f8c8d' }}>
+                退室判定に使用するため、ドア付近に設置するビーコンを1台選択してください。
+              </p>
+            </div>
             <button
               className="btn btn-primary"
               onClick={() => setStep(1)}
-              disabled={!roomName || selectedBeacons.length !== 3}
+              disabled={!roomName || selectedBeacons.length !== 3 || !doorBeaconId}
             >
               次へ
             </button>

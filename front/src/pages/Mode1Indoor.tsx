@@ -306,26 +306,130 @@ export default function Mode1Indoor() {
 
                 console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
 
-                // 特定のビーコンのRSSI合計で部屋外判定
-                const beacon1Mac = "C3000042ADFA";
-                const beacon2Mac = "C3000042ADFA"; // 同じMACアドレスが2つ指定されていますが、そのまま実装
-                const rssi1 = rssiMap[beacon1Mac] || 0;
-                const rssi2 = rssiMap[beacon2Mac] || 0;
-                const rssiSum = rssi1 + rssi2;
-                const RSSI_THRESHOLD = -160;
+                const doorBeaconIds: string[] = [];
+                if (
+                  Array.isArray((roomData as any).doorBeaconIds) &&
+                  (roomData as any).doorBeaconIds.length > 0
+                ) {
+                  doorBeaconIds.push(...(roomData as any).doorBeaconIds);
+                } else if (roomData.doorBeaconId) {
+                  doorBeaconIds.push(roomData.doorBeaconId);
+                }
 
-                console.log(`📡 ${device.deviceId} RSSI閾値チェック:`, {
-                  beacon1: beacon1Mac,
-                  rssi1,
-                  beacon2: beacon2Mac,
-                  rssi2,
-                  rssiSum,
-                  threshold: RSSI_THRESHOLD,
-                  isOutside: rssiSum < RSSI_THRESHOLD
-                });
+                const doorBeaconEntries = doorBeaconIds
+                  .map((id) => {
+                    const beacon = beacons.find((b) => b.firestoreId === id);
+                    if (!beacon?.mac) {
+                      return null;
+                    }
+                    return {
+                      id,
+                      name: beacon.name || beacon.beaconId || id,
+                      mac: beacon.mac.toUpperCase().replace(/:/g, ""),
+                    };
+                  })
+                  .filter(
+                    (
+                      entry
+                    ): entry is { id: string; name?: string; mac: string } =>
+                      entry !== null
+                  );
 
-                // RSSI閾値を下回った場合、部屋外判定
-                if (rssiSum < RSSI_THRESHOLD) {
+                let shouldForceOutside = false;
+                let exitReason: "door_beacon" | "fallback_rssi" | null = null;
+                let doorCheckDebug: any = null;
+                let fallbackCheckDebug: any = null;
+
+                if (doorBeaconEntries.length > 0) {
+                  const doorIdsSet = new Set(
+                    doorBeaconEntries.map((entry) => entry.id)
+                  );
+                  const doorRssiDetails = doorBeaconEntries.map((entry) => ({
+                    ...entry,
+                    rssi: rssiMap[entry.mac],
+                  }));
+                  const availableDoorRssi = doorRssiDetails.filter(
+                    (
+                      detail
+                    ): detail is typeof detail & {
+                      rssi: number;
+                    } => typeof detail.rssi === "number"
+                  );
+                  const DOOR_RSSI_THRESHOLD = -80;
+                  const averageDoorRssi =
+                    availableDoorRssi.length > 0
+                      ? availableDoorRssi.reduce(
+                          (sum, detail) => sum + detail.rssi,
+                          0
+                        ) / availableDoorRssi.length
+                      : null;
+                  const hasOtherBeaconSignal = receivedBeacons.some(
+                    (b) => !doorIdsSet.has(b.beaconId)
+                  );
+                  const allDoorBeaconsMissing = availableDoorRssi.length === 0;
+
+                  const forcedByWeakSignal =
+                    averageDoorRssi !== null &&
+                    averageDoorRssi < DOOR_RSSI_THRESHOLD;
+                  const forcedByMissingDoor =
+                    allDoorBeaconsMissing && hasOtherBeaconSignal;
+
+                  shouldForceOutside = forcedByWeakSignal || forcedByMissingDoor;
+                  if (shouldForceOutside) {
+                    exitReason = "door_beacon";
+                  }
+
+                  doorCheckDebug = {
+                    doorBeacons: doorRssiDetails.map((detail) => ({
+                      id: detail.id,
+                      mac: detail.mac,
+                      rssi: detail.rssi ?? null,
+                    })),
+                    averageDoorRssi,
+                    threshold: DOOR_RSSI_THRESHOLD,
+                    forcedByWeakSignal,
+                    forcedByMissingDoor,
+                    hasOtherBeaconSignal,
+                  };
+
+                  console.log(
+                    `🚪 ${device.deviceId} ドアビーコンRSSIチェック:`,
+                    doorCheckDebug
+                  );
+                } else {
+                  const fallbackBeaconMacs = expectedBeacons
+                    .slice(0, 2)
+                    .map((beacon) => beacon.mac);
+
+                  if (fallbackBeaconMacs.length > 0) {
+                    const RSSI_THRESHOLD_PER_BEACON = -80;
+                    const fallbackRssiSum = fallbackBeaconMacs.reduce(
+                      (sum, mac) => sum + (rssiMap[mac] ?? 0),
+                      0
+                    );
+                    const fallbackThreshold =
+                      RSSI_THRESHOLD_PER_BEACON * fallbackBeaconMacs.length;
+
+                    fallbackCheckDebug = {
+                      beaconMacs: fallbackBeaconMacs,
+                      rssiSum: fallbackRssiSum,
+                      threshold: fallbackThreshold,
+                    };
+
+                    console.log(
+                      `📡 ${device.deviceId} RSSI閾値チェック（フォールバック）:`,
+                      fallbackCheckDebug
+                    );
+
+                    if (fallbackRssiSum < fallbackThreshold) {
+                      shouldForceOutside = true;
+                      exitReason = "fallback_rssi";
+                    }
+                  }
+                }
+
+                // RSSIによる退室判定が成立した場合に退室処理を実行
+                if (shouldForceOutside) {
                   // ドアの外側位置を取得
                   const doorOutside = roomData.calibrationPoints.find(
                     (p) => p.id === "door_outside"
@@ -383,8 +487,9 @@ export default function Mode1Indoor() {
                     };
 
                     console.log(`🚪 ${device.deviceId} 部屋外判定（RSSI閾値）:`, {
-                      rssiSum,
-                      threshold: RSSI_THRESHOLD,
+                      reason: exitReason,
+                      doorCheck: doorCheckDebug,
+                      fallbackCheck: fallbackCheckDebug,
                       doorCenterPosition: { x: doorCenterMeterX, y: doorCenterMeterY },
                       exitPosition: outsidePosition,
                       exitDevicesCount: exitDevices.length
