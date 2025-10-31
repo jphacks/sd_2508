@@ -564,8 +564,11 @@ export default function Mode1Indoor() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const exitSpaceDepth = 2.0; // 奥行き1m
+    const exitSpaceWidth = 2.0; // 横幅1m
+
     // 退室スペースを含めた描画範囲を計算
-    const exitSpaceMargin = 2.0; // 退室スペース用の追加マージン（メートル）
+    const exitSpaceMargin = exitSpaceDepth;
     const padding = 40;
     
     // ドアの位置から退室スペースの方向を計算
@@ -638,9 +641,8 @@ export default function Mode1Indoor() {
       const normalizedVectorY = doorVectorY / doorVectorLength;
       
       // 退室スペースの矩形を描画
-      const exitSpaceWidth = 3.0; // 横幅3m
-      const exitSpaceDepth = exitSpaceMargin; // 奥行き2m
-      
+      const doorThickness = 0.05;
+
       // ドアの中心からメートル単位に変換（offsetを考慮）
       const doorDisplayX = doorCenterX * roomProfile.outline!.width;
       const doorDisplayY = doorCenterY * roomProfile.outline!.height;
@@ -653,7 +655,6 @@ export default function Mode1Indoor() {
       const angle = Math.atan2(doorVectorY, doorVectorX);
       ctx.rotate(angle);
       
-      const doorThickness = 0.05;
       ctx.fillRect(
         doorThickness * scale / 2,
         -exitSpaceWidth * scale / 2,
@@ -790,27 +791,6 @@ export default function Mode1Indoor() {
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(doorAngle + Math.PI / 2); // ベクトルに垂直
-
-        // ドアの矩形（幅0.9m、厚さ5cm）
-        const doorW = doorWidth * scale;
-        const doorH = doorThickness * scale;
-
-        ctx.fillStyle = "#D2691E";
-        ctx.fillRect(-doorW / 2, -doorH / 2, doorW, doorH);
-
-        // ドアの境界線
-        ctx.strokeStyle = "#8B4513";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-doorW / 2, -doorH / 2, doorW, doorH);
-
-        // ドアノブ（小さい円）
-        ctx.beginPath();
-        ctx.arc(doorW / 2 - 10, 0, 4, 0, Math.PI * 2);
-        ctx.fillStyle = "#FFD700";
-        ctx.fill();
-        ctx.strokeStyle = "#DAA520";
-        ctx.lineWidth = 1;
-        ctx.stroke();
 
         ctx.restore();
 
