@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { ref, onValue } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
 import { Device, BLEScan, RoomProfile, Alert, Beacon } from "../types";
 import { estimatePositionHybrid } from "../utils/positioning";
@@ -33,6 +34,7 @@ const FURNITURE_TYPES = {
 } as const;
 
 export default function Mode1Indoor() {
+  const location = useLocation();
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
@@ -48,10 +50,30 @@ export default function Mode1Indoor() {
   const [showLogPanel, setShowLogPanel] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [showRssiOverlay, setShowRssiOverlay] = useState(false);
+  const beaconNameMap = useMemo(() => {
+    const map = new Map<string, { name: string; firestoreId: string }>();
+    beacons.forEach((beacon) => {
+      if (!beacon.mac) {
+        return;
+      }
+      const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
+      map.set(normalizedMac, {
+        name: beacon.name || beacon.beaconId || normalizedMac,
+        firestoreId: beacon.firestoreId,
+      });
+    });
+    return map;
+  }, [beacons]);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    setShowRssiOverlay(params.has("rssi"));
+  }, [location.search]);
 
   const loadData = async () => {
     try {
@@ -667,7 +689,7 @@ export default function Mode1Indoor() {
     if (roomProfile && canvasRef.current) {
       drawRoom();
     }
-  }, [roomProfile, devicePositions]);
+  }, [roomProfile, devicePositions, showRssiOverlay]);
 
   const drawRoom = () => {
     const canvas = canvasRef.current;
@@ -926,6 +948,130 @@ export default function Mode1Indoor() {
       }
     }
 
+    if (
+      showRssiOverlay &&
+      roomProfile.calibrationPoints &&
+      roomProfile.calibrationPoints.length > 0
+    ) {
+      const previousTextAlign = ctx.textAlign;
+      const previousTextBaseline = ctx.textBaseline;
+      const previousFont = ctx.font;
+
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.font = "11px sans-serif";
+
+      roomProfile.calibrationPoints.forEach((point) => {
+        if (!point.measurements || point.measurements.length === 0) {
+          return;
+        }
+
+        const stats = new Map<
+          string,
+          {
+            sum: number;
+            count: number;
+          }
+        >();
+
+        point.measurements.forEach((measurement) => {
+          if (!measurement.rssiValues) {
+            return;
+          }
+
+          Object.entries(measurement.rssiValues).forEach(([mac, rssi]) => {
+            if (typeof rssi !== "number" || Number.isNaN(rssi)) {
+              return;
+            }
+
+            const normalizedMac = mac.toUpperCase().replace(/:/g, "");
+            const current = stats.get(normalizedMac) || { sum: 0, count: 0 };
+            current.sum += rssi;
+            current.count += 1;
+            stats.set(normalizedMac, current);
+          });
+        });
+
+        if (stats.size === 0) {
+          return;
+        }
+
+        const entries = Array.from(stats.entries())
+          .map(([mac, { sum, count }]) => {
+            const average = sum / Math.max(count, 1);
+            const beaconInfo = beaconNameMap.get(mac);
+            return {
+              mac,
+              name: beaconInfo?.name || mac,
+              average: Math.round(average),
+              count,
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+
+        const lines = [
+          `${point.label}`,
+          ...entries.map(
+            (entry) =>
+              `${entry.name}: ${entry.average}dBm${
+                entry.count > 1 ? ` (${entry.count})` : ""
+              }`
+          ),
+        ];
+
+        const lineHeight = 14;
+        const textWidths = lines.map((line) => ctx.measureText(line).width);
+        const boxWidth = Math.max(...textWidths, 0) + 12;
+        const boxHeight = lines.length * lineHeight + 8;
+
+        const normalizedX = point.position.x;
+        const normalizedY = point.position.y;
+
+        const pointX =
+          padding + (normalizedX * roomWidth + offsetX) * scale;
+        const pointY =
+          padding + (normalizedY * roomHeight + offsetY) * scale;
+
+        // マーカー
+        ctx.beginPath();
+        ctx.arc(pointX, pointY, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#1abc9c";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        let boxX = pointX + 12;
+        if (boxX + boxWidth > canvas.width - padding) {
+          boxX = pointX - boxWidth - 12;
+        }
+        boxX = Math.max(boxX, padding);
+
+        let boxY = pointY - boxHeight / 2;
+        if (boxY < padding) {
+          boxY = padding;
+        }
+        if (boxY + boxHeight > canvas.height - padding) {
+          boxY = canvas.height - padding - boxHeight;
+        }
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.strokeStyle = "#1abc9c";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+        ctx.fillStyle = "#34495e";
+        lines.forEach((line, index) => {
+          ctx.fillText(line, boxX + 6, boxY + 4 + lineHeight * index);
+        });
+      });
+
+      ctx.textAlign = previousTextAlign;
+      ctx.textBaseline = previousTextBaseline;
+      ctx.font = previousFont;
+    }
+
     // デバイスの位置を描画（最前面）
     if (devicePositions.size > 0) {
       console.log("Drawing devices:", devicePositions.size);
@@ -1000,7 +1146,7 @@ export default function Mode1Indoor() {
 
       return () => clearTimeout(timer);
     }
-  }, [roomProfile, devicePositions, devices]);
+  }, [roomProfile, devicePositions, devices, showRssiOverlay]);
 
   if (loading) {
     return (
