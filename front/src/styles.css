@@ -345,14 +345,13 @@ tbody tr:hover {
 /* アラート */
 .alert-stack {
   position: fixed;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 24px;
+  right: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 90%;
-  max-width: 500px;
+  width: 100%;
+  max-width: 320px;
   z-index: 1000;
 }
 
@@ -362,6 +361,14 @@ tbody tr:hover {
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   animation: slideDown 0.3s ease;
+}
+
+@media (max-width: 768px) {
+  .alert-stack {
+    top: 16px;
+    right: 16px;
+    max-width: calc(100% - 32px);
+  }
 }
 
 @keyframes slideDown {

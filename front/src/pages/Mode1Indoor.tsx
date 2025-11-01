@@ -33,6 +33,8 @@ const FURNITURE_TYPES = {
   door: { label: "ドア", width: 1, height: 0.2, color: "#D2691E" },
 } as const;
 
+const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30分
+
 export default function Mode1Indoor() {
   const location = useLocation();
   const [devices, setDevices] = useState<Device[]>([]);
@@ -64,19 +66,53 @@ export default function Mode1Indoor() {
     signals: Array<{ name: string; rssi: number }>;
   } | null>(null);
   const beaconNameMap = useMemo(() => {
-    const map = new Map<string, { name: string; firestoreId: string }>();
+    const map = new Map<
+      string,
+      { beaconId?: string }
+    >();
     beacons.forEach((beacon) => {
       if (!beacon.mac) {
         return;
       }
       const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
       map.set(normalizedMac, {
-        name: beacon.name || beacon.beaconId || normalizedMac,
-        firestoreId: beacon.firestoreId,
+        beaconId: beacon.beaconId ?? undefined,
       });
     });
     return map;
   }, [beacons]);
+
+  const selectBeaconLabel = (
+    info:
+      | Partial<{
+          beaconId: string | null;
+        }>
+      | undefined,
+    fallback: string
+  ) => {
+    const normalizeLabel = (value?: string | null) => {
+      if (typeof value !== "string") {
+        return null;
+      }
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    };
+
+    const uniqueCandidates = Array.from(
+      new Set(
+        [
+          normalizeLabel(info?.beaconId),
+          normalizeLabel(fallback),
+        ].filter((value): value is string => value !== null)
+      )
+    );
+
+    if (uniqueCandidates.length === 0) {
+      return fallback;
+    }
+
+    return uniqueCandidates.join(" → ");
+  };
 
   useEffect(() => {
     loadData();
@@ -306,14 +342,20 @@ export default function Mode1Indoor() {
                         });
                       }
 
-                      const beaconDisplayInfo =
-                        beaconNameMap.get(normalizedMac) ||
+                      const beaconInfoFromMap =
+                        beaconNameMap.get(normalizedMac);
+                      const expectedInfo =
                         expectedBeaconByMac.get(normalizedMac);
+                      const displayName = selectBeaconLabel(
+                        {
+                          beaconId:
+                            beaconInfoFromMap?.beaconId ||
+                            expectedInfo?.beaconId,
+                        },
+                        normalizedMac
+                      );
                       beaconSignals.push({
-                        name:
-                          beaconDisplayInfo?.name ||
-                          beaconDisplayInfo?.beaconName ||
-                          normalizedMac,
+                        name: displayName,
                         rssi: beacon.rssi,
                       });
                     }
@@ -330,7 +372,7 @@ export default function Mode1Indoor() {
                 // ログを記録（受信できなかったビーコンがある場合のみ）
                 if (missingBeacons.length > 0) {
                   const logEntry: BeaconLog = {
-                    id: `${device.devEUI}-${Date.now()}`,
+                    id: device.devEUI,
                     timestamp: new Date().toISOString(),
                     deviceId: device.devEUI,
                     deviceName: device.userName || device.deviceId,
@@ -339,8 +381,10 @@ export default function Mode1Indoor() {
                   };
 
                   setBeaconLogs((prev) => {
-                    // 最新100件まで保持
-                    const newLogs = [logEntry, ...prev].slice(0, 100);
+                    const withoutCurrent = prev.filter(
+                      (log) => log.deviceId !== device.devEUI
+                    );
+                    const newLogs = [logEntry, ...withoutCurrent].slice(0, 100);
                     return newLogs;
                   });
 
@@ -1139,9 +1183,17 @@ export default function Mode1Indoor() {
           .map(([mac, { sum, count }]) => {
             const average = sum / Math.max(count, 1);
             const beaconInfo = beaconNameMap.get(mac);
+            const label = selectBeaconLabel(
+              beaconInfo
+                ? {
+                    beaconId: beaconInfo.beaconId ?? null,
+                  }
+                : undefined,
+              mac
+            );
             return {
               mac,
-              name: beaconInfo?.name || mac,
+              name: label,
               average: Math.round(average),
               count,
             };
@@ -1529,34 +1581,6 @@ export default function Mode1Indoor() {
                       </div>
                     </div>
                   )}
-                  {log.receivedBeacons.length > 0 && (
-                    <div
-                      style={{
-                        backgroundColor: "#d4edda",
-                        border: "1px solid #28a745",
-                        borderRadius: "6px",
-                        padding: "8px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "12px",
-                          fontWeight: "600",
-                          color: "#155724",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        ✅ 受信したビーコン:
-                      </div>
-                      <div style={{ fontSize: "11px", color: "#155724" }}>
-                        {log.receivedBeacons
-                          .map(
-                            (b) => `${b.beaconName} (RSSI: ${b.rssi}dBm)`
-                          )
-                          .join(", ")}
-                      </div>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -1585,6 +1609,15 @@ export default function Mode1Indoor() {
             {devices.map((device) => {
               const position = devicePositions.get(device.devEUI);
               const timestamp = deviceTimestamps.get(device.devEUI);
+              const lastUpdateMs = timestamp ? Date.parse(timestamp) : NaN;
+              const isStale =
+                Number.isFinite(lastUpdateMs) &&
+                Date.now() - lastUpdateMs >= STALE_THRESHOLD_MS;
+              const statusColor = isStale
+                ? "#f39c12"
+                : position
+                ? "#50C878"
+                : "#95a5a6";
               return (
                 <div
                   key={device.devEUI}
@@ -1626,7 +1659,7 @@ export default function Mode1Indoor() {
                       width: "12px",
                       height: "12px",
                       borderRadius: "50%",
-                      backgroundColor: position ? "#50C878" : "#95a5a6",
+                      backgroundColor: statusColor,
                       marginTop: "4px",
                     }}
                   />
