@@ -299,7 +299,7 @@ export default function Mode1Indoor() {
                     );
                     if (beacon) {
                       return {
-                        beaconId: beacon.firestoreId,
+                        beaconId: beacon.beaconId || beacon.firestoreId, // FirestoreのbeaconIdフィールドを使用
                         beaconName: beacon.name || beacon.beaconId,
                         mac: beacon.mac.toUpperCase().replace(/:/g, ""),
                       };
@@ -425,7 +425,7 @@ export default function Mode1Indoor() {
                   .filter(
                     (
                       entry
-                    ): entry is { id: string; name?: string; mac: string } =>
+                    ): entry is { id: string; name: string; mac: string } =>
                       entry !== null
                   );
 
@@ -1702,7 +1702,7 @@ export default function Mode1Indoor() {
                   fontSize: "12px",
                   boxShadow: "0 8px 16px rgba(0, 0, 0, 0.15)",
                   pointerEvents: "none",
-                  maxWidth: "220px",
+                  maxWidth: "250px",
                   backdropFilter: "blur(4px)",
                 }}
               >
