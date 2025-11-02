@@ -3,10 +3,22 @@ import firebase_admin
 from firebase_admin import db
 
 _ILLEGAL = re.compile(r"[.#$/\[\]]")
+_MAX_LOG_CHARS = int(os.getenv("LOG_DECODED_MAXLEN", "4000"))
 
 
 def _safe_key(s: str) -> str:
     return _ILLEGAL.sub("_", str(s))
+
+
+def _log_json(label: str, obj: dict, maxlen: int = _MAX_LOG_CHARS):
+    """共通ログ関数: 辞書をJSON化して出力（長さ制限付き）"""
+    try:
+        s = json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except Exception as e:
+        s = f"<json-dumps-error: {e}>"
+    if len(s) > maxlen:
+        s = s[:maxlen] + f"...(truncated {len(s)-maxlen} chars)"
+    print(f"{label}: {s}")
 
 
 _APP_READY = False
@@ -72,20 +84,60 @@ def _to_iso_jst(epoch_sec: int) -> str:
 def decode_t1000_hex(hexstr: str) -> dict:
     """
     SenseCAP T1000 payload decoder (minimum).
-    Frame ID 0x08（Bluetooth Location & Sensor）を重点対応。
+    0x06: GNSS + sensor + battery
+    0x08: BLE + sensor + battery
     """
     try:
         b = bytes.fromhex(hexstr.strip())
     except Exception as e:
-        return {"error": f"invalid_hex: {e}", "hex": hexstr}
+        return {"error": f"invalid_hex: {e}", "hex": hexstr, "length": 0}
 
     if not b:
-        return {"error": "empty", "hex": hexstr}
+        return {"error": "empty", "hex": hexstr, "length": 0}
 
     fid = b[0]
     out = {"frame_id": fid, "length": len(b), "hex": hexstr.lower()}
-    print(f"[INFO] T1000 {hexstr} frame_id=0x{fid:02x} length={len(b)}")
 
+    # ---- 0x06 GNSS Location & Sensor ----
+    # Spec (Seeed Wiki):
+    # Byte1:  ID(0x06)
+    # 2-4:    event status (uint24)
+    # 5:      motion segment (uint8)
+    # 6-9:    UTC time (uint32, big-endian)
+    # 10-13:  longitude (int32, 1e-6 deg)
+    # 14-17:  latitude  (int32, 1e-6 deg)
+    # 18-19:  temperature (int16, /10 ℃)
+    # 20-21:  light (uint16, 0-100)
+    # 22:     battery (uint8, %)
+    if fid == 0x06 and len(b) >= 22:
+        event_status = (b[1] << 16) | (b[2] << 8) | b[3]
+        motion_seg = b[4]
+        utc = int.from_bytes(b[5:9], "big", signed=False)
+        lon_raw = int.from_bytes(b[9:13], "big", signed=True)
+        lat_raw = int.from_bytes(b[13:17], "big", signed=True)
+        temp_raw = int.from_bytes(b[17:19], "big", signed=True)
+        light_raw = int.from_bytes(b[19:21], "big", signed=False)
+        battery = b[21]
+
+        lon = lon_raw / 1_000_000.0
+        lat = lat_raw / 1_000_000.0
+
+        out.update(
+            {
+                "event_status": event_status,
+                "motion_segment": motion_seg,
+                "utc": utc,
+                "utc_iso": _to_iso_jst(utc),
+                "lon": lon,
+                "lat": lat,
+                "temperature_c": temp_raw / 10.0,
+                "light_pct": light_raw,
+                "battery_pct": battery,
+            }
+        )
+        return out
+
+    # ---- 0x08 Bluetooth Location & Sensor (あなたの既存実装) ----
     if fid == 0x08 and len(b) >= 35:
         event_status = (b[1] << 16) | (b[2] << 8) | b[3]
         motion_seg = b[4]
@@ -120,6 +172,7 @@ def decode_t1000_hex(hexstr: str) -> dict:
         )
         return out
 
+    # 未対応/短いフレームはそのまま返す
     return out
 
 
@@ -144,16 +197,29 @@ def pubsub_to_rtdb(data, context):
 
     # ① 外側 Base64 → uplink JSON
     uplink = {}
-    raw_text = None
     if data_b64:
         try:
             raw_text = base64.b64decode(data_b64).decode("utf-8")
             uplink = json.loads(raw_text)
         except Exception as e:
-            print("WARN: outer data decode/json failed:", e)
-            uplink = {}
+            print(f"WARN: outer data decode/json failed: {e}")
     else:
         print("INFO: no message.data in Pub/Sub")
+
+    # 外側uplinkのログ（base64本文は隠して長さだけ）
+    uplink_log = dict(uplink) if isinstance(uplink, dict) else {}
+    if "data" in uplink_log and isinstance(uplink_log["data"], str):
+        uplink_log["data_len"] = len(uplink_log["data"])
+        uplink_log["data"] = "<omitted: base64>"
+    _log_json(
+        "Uplink",
+        {
+            "attributes": attrs,
+            "messageId": message_id,
+            "publishTime": publish_time,
+            "uplink": uplink_log,
+        },
+    )
 
     # devEUI 決定（attributes の dev_eui も見る）
     dev_eui = (
@@ -175,64 +241,56 @@ def pubsub_to_rtdb(data, context):
     )
     dedup_key = _safe_key(dedup)
 
-    # まず原本を保存（そのまま）
-    # raw_doc = {
-    #     "raw": data,  # Pub/Sub から受けたそのまま（attributes, data(base64) 等）
-    #     "context": _ctx_summary(context),
-    #     "receivedAt": _now_iso(),
-    #     "serverTs": _server_ts(),
-    # }
-    # db.reference(f"raw/pubsub/{dedup_key}").transaction(lambda cur: cur or raw_doc)
-    # print(f"RAW saved at /raw/pubsub/{dedup}")
-
-    # uplink JSON を保存（あれば）
-    # if uplink:
-    #     db.reference(f"devices/{dev_key}/events/{dedup_key}").set(
-    #         {
-    #             "uplink": uplink,  # 外側JSONをそのまま格納
-    #             "attributes": attrs,
-    #             "meta": {
-    #                 "messageId": message_id,
-    #                 "publishTime": publish_time,
-    #                 "savedAt": _now_iso(),
-    #                 "serverTs": _server_ts(),
-    #                 "source": "pubsub/chirpstack",
-    #             },
-    #         }
-    #     )
-
     # ② uplink.data（アプリペイロード）の Base64 → 生バイト
     inner_b64 = uplink.get("data") if isinstance(uplink, dict) else None
     if inner_b64:
         try:
             raw_b = base64.b64decode(inner_b64)
             hexstr = raw_b.hex()
-            # db.reference(f"devices/{dev_key}/t1000_raw/{dedup_key}").set(
-            #     {
-            #         "base64": inner_b64,
-            #         "hex": hexstr,
-            #         "length": len(raw_b),
-            #         "eventTime": uplink.get("time") or publish_time,
-            #         "savedAt": _now_iso(),
-            #         "serverTs": _server_ts(),
-            #     }
-            # )
 
             # 再デコードして詳細を保存 & beacons に反映
             decoded = decode_t1000_hex(hexstr)
-            # db.reference(f"devices/{dev_key}/t1000_decoded/{dedup_key}").set(
-            #     {
-            #         **decoded,
-            #         "meta": {
-            #             "messageId": message_id,
-            #             "publishTime": publish_time,
-            #             "savedAt": _now_iso(),
-            #             "serverTs": _server_ts(),
-            #         },
-            #     }
-            # )
 
-            # frame_id 0x08 の場合は beacons を snapshot＋履歴に書き込む
+            # ★ ここで「どんなフレームでも」ログ
+            _log_json(
+                f"{dev_eui}.decoded",
+                {
+                    "device": dev_eui,
+                    "dedup": dedup,
+                    "decoded": decoded,
+                },
+            )
+            print(
+                f"INFO: decoded uplink data for {dev_eui} dedup={dedup} frame_id=0x{decoded.get('frame_id', 0):02x}"
+            )
+
+            # ---- 0x06 GNSS: スナップショット + 履歴に保存 ----
+            if (
+                decoded.get("frame_id") == 0x06
+                and ("lon" in decoded)
+                and ("lat" in decoded)
+            ):
+                ts_iso = decoded.get("utc_iso") or _now_iso()
+                gnss_doc = {
+                    "lon": decoded["lon"],
+                    "lat": decoded["lat"],
+                    "utc": decoded.get("utc"),
+                    "utc_iso": ts_iso,
+                    "event_status": decoded.get("event_status"),
+                    "motion_segment": decoded.get("motion_segment"),
+                    "battery_pct": decoded.get("battery_pct"),
+                    "temperature_c": decoded.get("temperature_c"),
+                    "light_pct": decoded.get("light_pct"),
+                    "savedAtServer": _server_ts(),
+                }
+
+                # スナップショット
+                db.reference(f"devices/{dev_key}/gnss").update(gnss_doc)
+
+                # 履歴（dedup キー）
+                db.reference(f"devices/{dev_key}/gnss_logs/{dedup_key}").set(gnss_doc)
+
+            # ---- 0x08 BLE: 既存の保存処理（そのまま）----
             if decoded.get("frame_id") == 0x08 and decoded.get("beacons"):
                 ts_iso = decoded.get("utc_iso") or _now_iso()
                 enriched = [{**b, "ts": ts_iso} for b in decoded["beacons"]]
@@ -253,11 +311,13 @@ def pubsub_to_rtdb(data, context):
                         "savedAtServer": _server_ts(),
                     }
                 )
-                print("Saved beacons from T1000 0x08")
+                # print("Saved beacons from T1000 0x08")
         except Exception as e:
-            print("WARN: inner payload base64 decode failed:", e)
+            print(f"WARN: inner payload base64 decode failed: {e}")
+    else:
+        print(f"INFO: uplink of {dev_eui} has no 'data' field")
 
-    print(
-        f"Saved devEUI={dev_eui} key={dedup} (uplink {'ok' if uplink else 'none'}, inner {'ok' if inner_b64 else 'none'})"
-    )
+    # print(
+    #     f"Saved devEUI={dev_eui} key={dedup} (uplink {'ok' if uplink else 'none'}, inner {'ok' if inner_b64 else 'none'})"
+    # )
     return "ok"
