@@ -100,21 +100,35 @@ export default function Mode1Indoor() {
       return trimmed.length > 0 ? trimmed : null;
     };
 
-    const uniqueCandidates = Array.from(
-      new Set(
-        [
-          normalizeLabel(info?.name),
-          normalizeLabel(info?.beaconId),
-          normalizeLabel(fallback),
-        ].filter((value): value is string => value !== null)
-      )
-    );
+    const nameCandidate = normalizeLabel(info?.name);
+    const idCandidate = normalizeLabel(info?.beaconId);
+    const fallbackCandidate = normalizeLabel(fallback);
 
-    if (uniqueCandidates.length === 0) {
-      return fallback;
+    const parts: string[] = [];
+
+    if (nameCandidate && nameCandidate !== idCandidate) {
+      parts.push(nameCandidate);
     }
 
-    return uniqueCandidates.join(" → ");
+    if (idCandidate) {
+      parts.push(idCandidate);
+    }
+
+    if (parts.length === 0) {
+      if (fallbackCandidate) {
+        parts.push(fallbackCandidate);
+      } else {
+        return fallback;
+      }
+    } else if (
+      fallbackCandidate &&
+      fallbackCandidate !== nameCandidate &&
+      fallbackCandidate !== idCandidate
+    ) {
+      parts.push(fallbackCandidate);
+    }
+
+    return parts.join(" → ");
   };
 
   useEffect(() => {
