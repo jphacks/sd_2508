@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { RoomProfile } from '../types';
+import { RoomProfile, Beacon } from '../types';
 
 export default function EditRoom() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -12,6 +12,34 @@ export default function EditRoom() {
   const [roomWidth, setRoomWidth] = useState<string>('');
   const [roomHeight, setRoomHeight] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [doorBeaconId, setDoorBeaconId] = useState<string>('');
+  const [beaconOptions, setBeaconOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [isSavingDoorBeacon, setIsSavingDoorBeacon] = useState(false);
+
+  const loadBeaconOptions = async (beaconIds: string[]) => {
+    if (!beaconIds || beaconIds.length === 0) {
+      setBeaconOptions([]);
+      return;
+    }
+
+    try {
+      const snapshot = await getDocs(collection(db, 'beacons'));
+      const options = snapshot.docs
+        .map((beaconDoc) => {
+          const data = beaconDoc.data() as Beacon;
+          return {
+            id: beaconDoc.id,
+            name: data.name || data.beaconId || beaconDoc.id
+          };
+        })
+        .filter((option) => beaconIds.includes(option.id));
+
+      setBeaconOptions(options);
+    } catch (error) {
+      console.error('ビーコン情報読み込みエラー:', error);
+      setBeaconOptions([]);
+    }
+  };
 
   useEffect(() => {
     loadRoom();
@@ -25,6 +53,8 @@ export default function EditRoom() {
       if (roomDoc.exists()) {
         const roomData = { roomId: roomDoc.id, ...roomDoc.data() } as RoomProfile;
         setRoom(roomData);
+        setDoorBeaconId(roomData.doorBeaconId || '');
+        await loadBeaconOptions(roomData.beacons || []);
         
         // 既存の部屋サイズを設定
         if (roomData.outline) {
@@ -76,6 +106,40 @@ export default function EditRoom() {
     }
   };
 
+  const saveDoorBeacon = async () => {
+    if (!roomId) return;
+
+    try {
+      setIsSavingDoorBeacon(true);
+      const updatedAt = new Date().toISOString();
+      await updateDoc(doc(db, 'rooms', roomId), {
+        doorBeaconId: doorBeaconId || null,
+        updatedAt
+      });
+
+      setRoom((prev) =>
+        prev
+          ? {
+              ...prev,
+              doorBeaconId: doorBeaconId || null,
+              updatedAt
+            }
+          : prev
+      );
+
+      alert(
+        doorBeaconId
+          ? 'ドア付近のビーコンを更新しました'
+          : 'ドア付近のビーコンの設定を解除しました'
+      );
+    } catch (error) {
+      console.error('ドアビーコン更新エラー:', error);
+      alert('ドア付近のビーコンの更新に失敗しました');
+    } finally {
+      setIsSavingDoorBeacon(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading">
@@ -106,64 +170,147 @@ export default function EditRoom() {
         </button>
       </div>
 
-      {/* 部屋サイズの設定・編集 */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>📏 部屋サイズの設定</h2>
-        <p style={{ marginBottom: '16px', fontSize: '14px', color: '#7f8c8d' }}>
-          実際の部屋サイズを入力すると、メートル単位で保存されます。<br />
-          未入力の場合は、0~1の正規化座標で保存されます。
-        </p>
+      {/* 部屋サイズの設定とビーコン情報 */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '24px',
+          marginBottom: '24px',
+          flexWrap: 'wrap',
+          alignItems: 'stretch'
+        }}
+      >
+        <div className="card" style={{ flex: '1 1 340px', marginBottom: 0 }}>
+          <h2 style={{ marginBottom: '16px' }}>部屋サイズの設定</h2>
+          <p style={{ marginBottom: '16px', fontSize: '14px', color: '#7f8c8d' }}>
+            実際の部屋サイズを入力すると、メートル単位で保存されます。<br />
+            未入力の場合は、0~1の正規化座標で保存されます。
+          </p>
 
-        {!room.outline && (
-          <div style={{
-            padding: '12px',
-            backgroundColor: '#FFF3CD',
-            borderRadius: '8px',
-            marginBottom: '16px',
-            fontSize: '14px',
-            borderLeft: '4px solid #FFC107'
-          }}>
-            <strong>ℹ️ 注意:</strong> 現在、部屋サイズが未設定のため、正規化座標（0~1）で保存されています。
-            実際の部屋サイズを入力すると、より正確な位置表示が可能になります。
-          </div>
-        )}
+          {!room.outline && (
+            <div style={{
+              padding: '12px',
+              backgroundColor: '#FFF3CD',
+              borderRadius: '8px',
+              marginBottom: '16px',
+              fontSize: '14px',
+              borderLeft: '4px solid #FFC107'
+            }}>
+              <strong>ℹ️ 注意:</strong> 現在、部屋サイズが未設定のため、正規化座標（0~1）で保存されています。
+              実際の部屋サイズを入力すると、より正確な位置表示が可能になります。
+            </div>
+          )}
 
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'flex-end' }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px', fontWeight: '600' }}>
-              幅（メートル）
-            </label>
-            <input
-              type="number"
-              className="form-input"
-              placeholder="例: 10.5"
-              value={roomWidth}
-              onChange={(e) => setRoomWidth(e.target.value)}
-              step="0.1"
-              min="0"
-            />
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px', fontWeight: '600' }}>
+                幅（メートル）
+              </label>
+              <input
+                type="number"
+                className="form-input"
+                placeholder="例: 10.5"
+                value={roomWidth}
+                onChange={(e) => setRoomWidth(e.target.value)}
+                step="0.1"
+                min="0"
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px', fontWeight: '600' }}>
+                高さ（メートル）
+              </label>
+              <input
+                type="number"
+                className="form-input"
+                placeholder="例: 8.2"
+                value={roomHeight}
+                onChange={(e) => setRoomHeight(e.target.value)}
+                step="0.1"
+                min="0"
+              />
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={saveRoomSize}
+              style={{ marginBottom: '0' }}
+            >
+              {room.outline ? 'サイズを更新' : 'サイズを設定'}
+            </button>
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px', fontWeight: '600' }}>
-              高さ（メートル）
+        </div>
+
+        <div className="card" style={{ flex: '1 1 340px', marginBottom: 0 }}>
+          <h2 style={{ marginBottom: '16px' }}>ビーコン情報</h2>
+          <p style={{ marginBottom: '16px', fontSize: '14px' }}>
+            <strong>使用ビーコン数:</strong> {room.beacons.length}台
+          </p>
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '14px', marginBottom: '8px', fontWeight: '600' }}>
+              ドア付近のビーコン
             </label>
-            <input
-              type="number"
-              className="form-input"
-              placeholder="例: 8.2"
-              value={roomHeight}
-              onChange={(e) => setRoomHeight(e.target.value)}
-              step="0.1"
-              min="0"
-            />
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(200px, 1fr) auto',
+                gap: '12px',
+                alignItems: 'center'
+              }}
+            >
+              <select
+                className="form-input"
+                value={doorBeaconId}
+                onChange={(e) => setDoorBeaconId(e.target.value)}
+                disabled={beaconOptions.length === 0 || isSavingDoorBeacon}
+                style={{ width: '100%' }}
+              >
+                <option value="">未設定</option>
+                {beaconOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-primary"
+                onClick={saveDoorBeacon}
+                disabled={
+                  isSavingDoorBeacon ||
+                  (doorBeaconId === (room.doorBeaconId ?? ''))
+                }
+              >
+                {isSavingDoorBeacon ? '更新中...' : '設定を保存'}
+              </button>
+            </div>
+            {beaconOptions.length === 0 && (
+              <p style={{ marginTop: '8px', fontSize: '12px', color: '#c0392b' }}>
+                利用できるビーコンがありません。キャリブレーションでビーコンを設定してください。
+              </p>
+            )}
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={saveRoomSize}
-            style={{ marginBottom: '0' }}
-          >
-            {room.outline ? 'サイズを更新' : 'サイズを設定'}
-          </button>
+          {room.beaconPositions && room.beaconPositions.length > 0 ? (
+            <div>
+              <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>ビーコン配置</h3>
+              <ul style={{ paddingLeft: '20px', lineHeight: '2', fontSize: '14px' }}>
+                {room.beaconPositions.map((beacon, index) => {
+                  const displayX = room.outline ? (beacon.position.x * room.outline.width).toFixed(2) : (beacon.position.x * 100).toFixed(0);
+                  const displayY = room.outline ? (beacon.position.y * room.outline.height).toFixed(2) : (beacon.position.y * 100).toFixed(0);
+                  const unit = room.outline ? 'm' : '%';
+                  
+                  return (
+                    <li key={index}>
+                      <strong>{beacon.name}</strong><br />
+                      <span style={{ fontSize: '12px', color: '#7f8c8d', marginLeft: '8px' }}>
+                        位置: ({displayX}{unit}, {displayY}{unit})
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : (
+            <p style={{ color: '#7f8c8d' }}>ビーコンが配置されていません</p>
+          )}
         </div>
       </div>
 
@@ -171,7 +318,7 @@ export default function EditRoom() {
       <div style={{ display: 'flex', gap: '24px', marginBottom: '24px' }}>
         {/* キャリブレーション点の追加 */}
         <div className="card" style={{ flex: 1 }}>
-          <h2 style={{ marginBottom: '16px' }}>📍 キャリブレーション点の管理</h2>
+          <h2 style={{ marginBottom: '16px' }}>キャリブレーション点の管理</h2>
           <p style={{ marginBottom: '16px', fontSize: '14px', color: '#7f8c8d' }}>
             キャリブレーション点を追加することで、位置推定の精度を向上できます。
           </p>
@@ -211,7 +358,7 @@ export default function EditRoom() {
         {/* 家具情報と編集ボタン */}
         <div className="card" style={{ flex: 1 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h2 style={{ margin: 0 }}>🪑 家具とオブジェクトの配置</h2>
+            <h2 style={{ margin: 0 }}>家具とオブジェクトの配置</h2>
             <button
               className="btn btn-primary"
               onClick={() => navigate(`/edit-furniture/${roomId}`)}
@@ -259,38 +406,6 @@ export default function EditRoom() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* ビーコン情報 */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>📡 ビーコン情報</h2>
-        <p style={{ marginBottom: '16px', fontSize: '14px' }}>
-          <strong>使用ビーコン数:</strong> {room.beacons.length}台
-        </p>
-        {room.beaconPositions && room.beaconPositions.length > 0 ? (
-          <div>
-            <h3 style={{ fontSize: '16px', marginBottom: '8px' }}>ビーコン配置</h3>
-            <ul style={{ paddingLeft: '20px', lineHeight: '2', fontSize: '14px' }}>
-              {room.beaconPositions.map((beacon, index) => {
-                // 部屋サイズが設定されている場合はメートル単位で表示、それ以外は正規化座標で表示
-                const displayX = room.outline ? (beacon.position.x * room.outline.width).toFixed(2) : (beacon.position.x * 100).toFixed(0);
-                const displayY = room.outline ? (beacon.position.y * room.outline.height).toFixed(2) : (beacon.position.y * 100).toFixed(0);
-                const unit = room.outline ? 'm' : '%';
-                
-                return (
-                  <li key={index}>
-                    <strong>{beacon.name}</strong><br />
-                    <span style={{ fontSize: '12px', color: '#7f8c8d', marginLeft: '8px' }}>
-                      位置: ({displayX}{unit}, {displayY}{unit})
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : (
-          <p style={{ color: '#7f8c8d' }}>ビーコンが配置されていません</p>
-        )}
       </div>
 
       {/* ヒント */}

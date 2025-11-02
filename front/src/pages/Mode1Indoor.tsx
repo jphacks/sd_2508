@@ -1,9 +1,35 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { ref, onValue } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
 import { Device, BLEScan, RoomProfile, Alert, Beacon } from "../types";
 import { estimatePositionHybrid } from "../utils/positioning";
+
+// ビーコン受信ログの型定義
+interface BeaconLog {
+  id: string;
+  timestamp: string;
+  deviceId: string;
+  deviceName: string;
+  missingBeacons: Array<{
+    beaconId: string;
+    beaconName: string;
+    mac: string;
+  }>;
+  receivedBeacons: Array<{
+    beaconId: string;
+    beaconName: string;
+    mac: string;
+    rssi: number;
+  }>;
+}
+
+type BeaconSignal = {
+  beaconId: string;
+  mac: string;
+  rssi: number;
+};
 
 const FURNITURE_TYPES = {
   desk: { label: "机", width: 2, height: 1, color: "#8B4513" },
@@ -13,8 +39,13 @@ const FURNITURE_TYPES = {
   door: { label: "ドア", width: 1, height: 0.2, color: "#D2691E" },
 } as const;
 
+const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30分
+
 export default function Mode1Indoor() {
+  const location = useLocation();
   const [devices, setDevices] = useState<Device[]>([]);
+  const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
+  const beaconsRef = useRef<(Beacon & { firestoreId: string })[]>([]);
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
   const [devicePositions, setDevicePositions] = useState<
     Map<string, { x: number; y: number }>
@@ -24,13 +55,68 @@ export default function Mode1Indoor() {
   );
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
-  const [alertOnExit, setAlertOnExit] = useState(true);
+  const [beaconLogs, setBeaconLogs] = useState<BeaconLog[]>([]);
+  const [showLogPanel, setShowLogPanel] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [showRssiOverlay, setShowRssiOverlay] = useState(false);
+  const [deviceBeaconSignals, setDeviceBeaconSignals] = useState<
+    Map<string, BeaconSignal[]>
+  >(new Map());
+  const [infoIconPositions, setInfoIconPositions] = useState<
+    Map<string, { x: number; y: number; radius: number }>
+  >(new Map());
+  const [tooltip, setTooltip] = useState<{
+    deviceId: string;
+    left: number;
+    top: number;
+    signals: BeaconSignal[];
+  } | null>(null);
+  useEffect(() => {
+    beaconsRef.current = beacons;
+  }, [beacons]);
+
+  const getBeaconInfo = useCallback((mac: string) => {
+    const normalized = mac.toUpperCase().replace(/:/g, "");
+    const beacon = beaconsRef.current.find((b) => {
+      if (!b.mac) return false;
+      return b.mac.toUpperCase().replace(/:/g, "") === normalized;
+    });
+    if (!beacon) {
+      return null;
+    }
+    return {
+      beaconId: beacon.beaconId ?? undefined,
+      name: beacon.name ?? undefined,
+    };
+  }, []);
+
+  const selectBeaconLabel = (
+    info:
+      | Partial<{
+          beaconId: string | null;
+          name: string | null;
+        }>
+      | undefined,
+    fallback: string
+  ) => {
+    const values = [info?.name, info?.beaconId, fallback]
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter(
+        (value, index, array) =>
+          value.length > 0 && array.indexOf(value) === index
+      );
+    return values.length > 0 ? values.join(" → ") : fallback;
+  };
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    setShowRssiOverlay(params.has("rssi"));
+  }, [location.search]);
 
   const loadData = async () => {
     try {
@@ -90,6 +176,7 @@ export default function Mode1Indoor() {
                 ...doc.data(),
               } as Beacon & { firestoreId: string })
           );
+          setBeacons(beaconsData);
 
           // ルームで使用するビーコンの位置情報を構築
           const beaconPositions = roomData.beacons
@@ -185,8 +272,45 @@ export default function Mode1Indoor() {
                   });
                 }
 
-                // 各ビーコンからRSSI値を取得
+                // 各ビーコンからRSSI値を取得（無効な信号をフィルタリング）
                 const rssiMap: { [beaconId: string]: number } = {};
+                const receivedBeacons: Array<{
+                  beaconId: string;
+                  beaconName: string;
+                  mac: string;
+                  rssi: number;
+                }> = [];
+                const missingBeacons: Array<{
+                  beaconId: string;
+                  beaconName: string;
+                  mac: string;
+                }> = [];
+
+                // ルームで使用するビーコンのリストを取得
+                const expectedBeacons = roomData.beacons
+                  .map((beaconId) => {
+                    const beacon = beaconsRef.current.find(
+                      (b) => b.firestoreId === beaconId
+                    );
+                    if (beacon) {
+                      return {
+                        beaconId: beacon.beaconId || beacon.firestoreId, // FirestoreのbeaconIdフィールドを使用
+                        beaconName: beacon.name || beacon.beaconId,
+                        mac: beacon.mac.toUpperCase().replace(/:/g, ""),
+                      };
+                    }
+                    return null;
+                  })
+                  .filter((b) => b !== null) as Array<{
+                  beaconId: string;
+                  beaconName: string;
+                  mac: string;
+                }>;
+
+                const expectedBeaconByMac = new Map(
+                  expectedBeacons.map((beacon) => [beacon.mac, beacon])
+                );
+                const beaconSignals: BeaconSignal[] = [];
 
                 data.beacons.forEach((beacon: any) => {
                   if (beacon.mac && beacon.rssi) {
@@ -194,36 +318,331 @@ export default function Mode1Indoor() {
                     const normalizedMac = beacon.mac
                       .toUpperCase()
                       .replace(/:/g, "");
-                    rssiMap[normalizedMac] = beacon.rssi;
+
+                    // 無効な信号をフィルタリング（MAC: ff:ff:ff:ff:ff:ff, RSSI: -1）
+                    const isInvalidSignal =
+                      normalizedMac === "FFFFFFFFFFFF" || beacon.rssi === -1;
+
+                    if (!isInvalidSignal) {
+                      rssiMap[normalizedMac] = beacon.rssi;
+
+                      // 受信したビーコンをログに記録
+                      const beaconInfo = expectedBeacons.find(
+                        (b) => b.mac === normalizedMac
+                      );
+                      if (beaconInfo) {
+                        receivedBeacons.push({
+                          ...beaconInfo,
+                          rssi: beacon.rssi,
+                        });
+                      }
+
+                      const beaconInfoFromMap = getBeaconInfo(normalizedMac);
+                      const expectedInfo =
+                        expectedBeaconByMac.get(normalizedMac);
+                      const beaconId =
+                        beaconInfoFromMap?.beaconId?.trim() ||
+                        expectedInfo?.beaconId?.trim() ||
+                        normalizedMac;
+                      beaconSignals.push({
+                        beaconId,
+                        mac: normalizedMac,
+                        rssi: beacon.rssi,
+                      });
+                    }
                   }
                 });
 
-                console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
+                // 受信できなかったビーコンを特定
+                expectedBeacons.forEach((expectedBeacon) => {
+                  if (!rssiMap[expectedBeacon.mac]) {
+                    missingBeacons.push(expectedBeacon);
+                  }
+                });
 
-                // ハイブリッド位置推定（Fingerprinting + 三辺測量）
-                const position = estimatePositionHybrid(
-                  rssiMap,
-                  roomData.calibrationPoints,
-                  beaconPositions.length >= 3 ? beaconPositions : undefined
-                );
+                // ログを記録（受信できなかったビーコンがある場合のみ）
+                if (missingBeacons.length > 0) {
+                  const logEntry: BeaconLog = {
+                    id: device.devEUI,
+                    timestamp: new Date().toISOString(),
+                    deviceId: device.devEUI,
+                    deviceName: device.userName || device.deviceId,
+                    missingBeacons,
+                    receivedBeacons,
+                  };
 
-                if (position) {
-                  setDevicePositions((prev) => {
-                    const newMap = new Map(prev);
-                    newMap.set(device.devEUI, { x: position.x, y: position.y });
-                    return newMap;
+                  setBeaconLogs((prev) => {
+                    const withoutCurrent = prev.filter(
+                      (log) => log.deviceId !== device.devEUI
+                    );
+                    const newLogs = [logEntry, ...withoutCurrent].slice(0, 100);
+                    return newLogs;
                   });
 
-                  // 部屋の外に出たかチェック
-                  checkRoomExit(device, position, roomData);
-
-                  // デバッグ用にメソッド情報を表示（オプション）
                   console.log(
-                    `${device.deviceId}: ${position.method} (信頼度: ${(
-                      position.confidence * 100
-                    ).toFixed(1)}%)`
+                    `⚠️ ${device.deviceId} ビーコン受信状況:`,
+                    {
+                      received: receivedBeacons.length,
+                      missing: missingBeacons.length,
+                      missingBeacons: missingBeacons.map((b) => b.beaconName),
+                    }
                   );
                 }
+
+                console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
+
+                const doorBeaconIds: string[] = [];
+                if (
+                  Array.isArray((roomData as any).doorBeaconIds) &&
+                  (roomData as any).doorBeaconIds.length > 0
+                ) {
+                  doorBeaconIds.push(...(roomData as any).doorBeaconIds);
+                } else if (roomData.doorBeaconId) {
+                  doorBeaconIds.push(roomData.doorBeaconId);
+                }
+
+                const doorBeaconEntries = doorBeaconIds
+                  .map((id) => {
+                    const beacon = beacons.find((b) => b.firestoreId === id);
+                    if (!beacon?.mac) {
+                      return null;
+                    }
+                    return {
+                      id,
+                      name: beacon.name || beacon.beaconId || id,
+                      mac: beacon.mac.toUpperCase().replace(/:/g, ""),
+                    };
+                  })
+                  .filter(
+                    (
+                      entry
+                    ): entry is { id: string; name: string; mac: string } =>
+                      entry !== null
+                  );
+
+                let shouldForceOutside = false;
+                let exitReason: "door_beacon" | "fallback_rssi" | null = null;
+                let doorCheckDebug: any = null;
+                let fallbackCheckDebug: any = null;
+
+                if (doorBeaconEntries.length > 0) {
+                  const doorIdsSet = new Set(
+                    doorBeaconEntries.map((entry) => entry.id)
+                  );
+                  const doorRssiDetails = doorBeaconEntries.map((entry) => ({
+                    ...entry,
+                    rssi: rssiMap[entry.mac],
+                  }));
+                  const availableDoorRssi = doorRssiDetails.filter(
+                    (
+                      detail
+                    ): detail is typeof detail & {
+                      rssi: number;
+                    } => typeof detail.rssi === "number"
+                  );
+                  const DOOR_RSSI_THRESHOLD = -80;
+                  const averageDoorRssi =
+                    availableDoorRssi.length > 0
+                      ? availableDoorRssi.reduce(
+                          (sum, detail) => sum + detail.rssi,
+                          0
+                        ) / availableDoorRssi.length
+                      : null;
+                  const hasOtherBeaconSignal = receivedBeacons.some(
+                    (b) => !doorIdsSet.has(b.beaconId)
+                  );
+                  const allDoorBeaconsMissing = availableDoorRssi.length === 0;
+
+                  const forcedByWeakSignal =
+                    averageDoorRssi !== null &&
+                    averageDoorRssi < DOOR_RSSI_THRESHOLD;
+                  const forcedByMissingDoor =
+                    allDoorBeaconsMissing && hasOtherBeaconSignal;
+
+                  shouldForceOutside = forcedByWeakSignal || forcedByMissingDoor;
+                  if (shouldForceOutside) {
+                    exitReason = "door_beacon";
+                  }
+
+                  doorCheckDebug = {
+                    doorBeacons: doorRssiDetails.map((detail) => ({
+                      id: detail.id,
+                      mac: detail.mac,
+                      rssi: detail.rssi ?? null,
+                    })),
+                    averageDoorRssi,
+                    threshold: DOOR_RSSI_THRESHOLD,
+                    forcedByWeakSignal,
+                    forcedByMissingDoor,
+                    hasOtherBeaconSignal,
+                  };
+
+                  console.log(
+                    `🚪 ${device.deviceId} ドアビーコンRSSIチェック:`,
+                    doorCheckDebug
+                  );
+                } else {
+                  const fallbackBeaconMacs = expectedBeacons
+                    .slice(0, 2)
+                    .map((beacon) => beacon.mac);
+
+                  if (fallbackBeaconMacs.length > 0) {
+                    const RSSI_THRESHOLD_PER_BEACON = -80;
+                    const fallbackRssiSum = fallbackBeaconMacs.reduce(
+                      (sum, mac) => sum + (rssiMap[mac] ?? 0),
+                      0
+                    );
+                    const fallbackThreshold =
+                      RSSI_THRESHOLD_PER_BEACON * fallbackBeaconMacs.length;
+
+                    fallbackCheckDebug = {
+                      beaconMacs: fallbackBeaconMacs,
+                      rssiSum: fallbackRssiSum,
+                      threshold: fallbackThreshold,
+                    };
+
+                    console.log(
+                      `📡 ${device.deviceId} RSSI閾値チェック（フォールバック）:`,
+                      fallbackCheckDebug
+                    );
+
+                    if (fallbackRssiSum < fallbackThreshold) {
+                      shouldForceOutside = true;
+                      exitReason = "fallback_rssi";
+                    }
+                  }
+                }
+
+                // RSSIによる退室判定が成立した場合に退室処理を実行
+                if (shouldForceOutside) {
+                  // ドアの外側位置を取得
+                  const doorOutside = roomData.calibrationPoints.find(
+                    (p) => p.id === "door_outside"
+                  );
+                  const doorInside = roomData.calibrationPoints.find(
+                    (p) => p.id === "door_inside"
+                  );
+
+                  if (doorOutside && doorInside) {
+                    // ドアの中心位置を計算（描画時と同じ）
+                    const doorCenterX = (doorInside.position.x + doorOutside.position.x) / 2;
+                    const doorCenterY = (doorInside.position.y + doorOutside.position.y) / 2;
+                    
+                    // ドアの向きベクトルを計算（内側→外側）
+                    const doorVectorX = doorOutside.position.x - doorInside.position.x;
+                    const doorVectorY = doorOutside.position.y - doorInside.position.y;
+                    const doorVectorLength = Math.sqrt(doorVectorX * doorVectorX + doorVectorY * doorVectorY);
+                    
+                    // 正規化したベクトル
+                    const normalizedVectorX = doorVectorX / doorVectorLength;
+                    const normalizedVectorY = doorVectorY / doorVectorLength;
+                    
+                    // ドアの中心からメートル単位に変換
+                    const outlineWidth = roomData.outline?.width ?? 1;
+                    const outlineHeight = roomData.outline?.height ?? 1;
+                    const doorCenterMeterX = doorCenterX * outlineWidth;
+                    const doorCenterMeterY = doorCenterY * outlineHeight;
+                    
+                    // 退室スペースの距離（ドア中心から1.5m外側）
+                    const exitSpaceDistance = 1.5;
+                    
+                    // 複数のデバイスが退室した場合の分散配置
+                    const exitDevices = Array.from(devicePositions.entries()).filter(([devEUI, pos]) => {
+                      const margin = 0.5;
+                      return !(
+                        pos.x >= -margin &&
+                        pos.x <= outlineWidth + margin &&
+                        pos.y >= -margin &&
+                        pos.y <= outlineHeight + margin
+                      );
+                    });
+                    
+                    // 現在のデバイスのインデックスを取得
+                    const deviceIndex = exitDevices.findIndex(([devEUI]) => devEUI === device.devEUI);
+                    const actualIndex = deviceIndex >= 0 ? deviceIndex : exitDevices.length;
+                    
+                    // 横方向のオフセット（-0.5m から 0.5m の範囲で分散）
+                    const lateralOffset = (actualIndex % 5 - 2) * 0.3; // 最大5人まで横に並べる
+                    const depthOffset = Math.floor(actualIndex / 5) * 0.3; // 5人を超えたら奥行き方向にも配置
+                    
+                    // 退室スペースの位置を計算（ドア中心を基準に）
+                    const outsidePosition = {
+                      x: doorCenterMeterX + normalizedVectorX * (exitSpaceDistance + depthOffset) - normalizedVectorY * lateralOffset,
+                      y: doorCenterMeterY + normalizedVectorY * (exitSpaceDistance + depthOffset) + normalizedVectorX * lateralOffset
+                    };
+
+                    console.log(`🚪 ${device.deviceId} 部屋外判定（RSSI閾値）:`, {
+                      reason: exitReason,
+                      doorCheck: doorCheckDebug,
+                      fallbackCheck: fallbackCheckDebug,
+                      doorCenterPosition: { x: doorCenterMeterX, y: doorCenterMeterY },
+                      exitPosition: outsidePosition,
+                      exitDevicesCount: exitDevices.length
+                    });
+
+                    // 退室スペースの位置に配置
+                    setDevicePositions((prev) => {
+                      const newMap = new Map(prev);
+                      newMap.set(device.devEUI, outsidePosition);
+                      return newMap;
+                    });
+
+                    // 部屋外アラートを発報
+                    checkRoomExit(device, outsidePosition, roomData, true);
+                  }
+                } else {
+                  // RSSI閾値を上回っている場合、通常の位置推定を実行
+                  const position = estimatePositionHybrid(
+                    rssiMap,
+                    roomData.calibrationPoints,
+                    beaconPositions.length >= 3 ? beaconPositions : undefined
+                  );
+
+                  if (position) {
+                    console.log(`📍 ${device.deviceId} 位置推定結果:`, {
+                      normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
+                      method: position.method,
+                      confidence: `${(position.confidence * 100).toFixed(1)}%`,
+                      rssiCount: Object.keys(rssiMap).length
+                    });
+
+                    const outlineWidth = roomData.outline?.width ?? 1;
+                    const outlineHeight = roomData.outline?.height ?? 1;
+                    const actualPosition = {
+                      x: position.x * outlineWidth,
+                      y: position.y * outlineHeight
+                    };
+                    console.log(`📍 ${device.deviceId} 実座標換算:`, {
+                      position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
+                      roomSize: { width: outlineWidth, height: outlineHeight }
+                    });
+
+                    setDevicePositions((prev) => {
+                      const newMap = new Map(prev);
+                      newMap.set(device.devEUI, actualPosition);
+                      return newMap;
+                    });
+
+                    // 部屋の外に出たかチェック（通常判定）
+                    checkRoomExit(device, actualPosition, roomData, false);
+
+                    // デバッグ用にメソッド情報を表示（オプション）
+                    console.log(
+                      `${device.deviceId}: ${position.method} (信頼度: ${(
+                        position.confidence * 100
+                      ).toFixed(1)}%)`
+                    );
+                  }
+                }
+
+                setDeviceBeaconSignals((prev) => {
+                  const newMap = new Map(prev);
+                  const sortedSignals = beaconSignals.sort((a, b) =>
+                    a.beaconId.localeCompare(b.beaconId, "ja")
+                  );
+                  newMap.set(device.devEUI, sortedSignals);
+                  return newMap;
+                });
               }
             });
           });
@@ -240,37 +659,67 @@ export default function Mode1Indoor() {
   const checkRoomExit = (
     device: Device,
     position: { x: number; y: number },
-    room: RoomProfile
+    room: RoomProfile,
+    forceOutside: boolean = false
   ) => {
     const margin = 0.5;
-    const isInside =
+    const outlineWidth = room.outline?.width ?? 1;
+    const outlineHeight = room.outline?.height ?? 1;
+    const isInside = forceOutside ? false : (
       position.x >= -margin &&
-      position.x <= room.outline!.width + margin &&
+      position.x <= outlineWidth + margin &&
       position.y >= -margin &&
-      position.y <= room.outline!.height + margin;
+      position.y <= outlineHeight + margin
+    );
+
+    console.log(`🔍 ${device.deviceId} 部屋チェック:`, {
+      position: { x: position.x.toFixed(2), y: position.y.toFixed(2) },
+      roomBounds: { 
+        width: outlineWidth, 
+        height: outlineHeight 
+      },
+      margin,
+      isInside,
+      forceOutside,
+      checks: {
+        xMin: position.x >= -margin,
+        xMax: position.x <= outlineWidth + margin,
+        yMin: position.y >= -margin,
+        yMax: position.y <= outlineHeight + margin
+      }
+    });
 
     if (!isInside) {
+      const alertId = `exit_room-${device.devEUI}`;
       const alert: Alert = {
-        id: `alert-${Date.now()}`,
+        id: alertId,
         type: "exit_room",
-        message: `${device.userName || device.deviceId} が部屋から出ました！`,
+        message: `${device.userName || device.deviceId} が部屋から出たようです！`,
         deviceId: device.devEUI,
         deviceName: device.userName,
         timestamp: new Date().toISOString(),
         dismissed: false,
       };
 
-      setAlerts((prev) => [...prev, alert]);
+      let shouldScheduleCleanup = false;
+      setAlerts((prev) => {
+        if (prev.some((a) => a.id === alertId)) {
+          return prev;
+        }
+        shouldScheduleCleanup = true;
+        return [...prev, alert];
+      });
 
-      // アラート音を鳴らす
-      if (audioRef.current) {
-        audioRef.current.play();
+      if (shouldScheduleCleanup) {
+        if (audioRef.current) {
+          audioRef.current.play();
+        }
+
+        // 5秒後に自動で消す
+        setTimeout(() => {
+          setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+        }, 5000);
       }
-
-      // 5秒後に自動で消す
-      setTimeout(() => {
-        setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
-      }, 5000);
     }
   };
 
@@ -312,7 +761,110 @@ export default function Mode1Indoor() {
     if (roomProfile && canvasRef.current) {
       drawRoom();
     }
-  }, [roomProfile, devicePositions]);
+  }, [roomProfile, devicePositions, showRssiOverlay]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const canvasX = (event.clientX - rect.left) * scaleX;
+      const canvasY = (event.clientY - rect.top) * scaleY;
+
+      let hoveredDeviceId: string | null = null;
+      infoIconPositions.forEach((icon, deviceId) => {
+        const dx = canvasX - icon.x;
+        const dy = canvasY - icon.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance <= icon.radius) {
+          hoveredDeviceId = deviceId;
+        }
+      });
+
+      if (hoveredDeviceId) {
+        const icon = infoIconPositions.get(hoveredDeviceId);
+        if (!icon) return;
+
+        const containerRect =
+          canvas.parentElement?.getBoundingClientRect() ?? rect;
+        const scaleCssX = rect.width / canvas.width;
+        const scaleCssY = rect.height / canvas.height;
+        const left =
+          icon.x * scaleCssX + (rect.left - containerRect.left) + 12;
+        const top =
+          icon.y * scaleCssY + (rect.top - containerRect.top) - 12;
+        const signals = deviceBeaconSignals.get(hoveredDeviceId) || [];
+
+        setTooltip((prev) => {
+          if (
+            prev &&
+            prev.deviceId === hoveredDeviceId &&
+            Math.abs(prev.left - left) < 0.5 &&
+            Math.abs(prev.top - top) < 0.5
+          ) {
+            return prev;
+          }
+          return {
+            deviceId: hoveredDeviceId!,
+            left,
+            top,
+            signals,
+          };
+        });
+      } else {
+        setTooltip((prev) => (prev ? null : prev));
+      }
+    };
+
+    const handleMouseLeave = () => {
+      setTooltip(null);
+    };
+
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseleave", handleMouseLeave);
+
+    return () => {
+      canvas.removeEventListener("mousemove", handleMouseMove);
+      canvas.removeEventListener("mouseleave", handleMouseLeave);
+    };
+  }, [infoIconPositions, deviceBeaconSignals]);
+
+  useEffect(() => {
+    if (!tooltip) return;
+    const signals = deviceBeaconSignals.get(tooltip.deviceId) || [];
+    setTooltip((prev) => {
+      if (!prev) return prev;
+      const sameLength = prev.signals.length === signals.length;
+      const sameContent =
+        sameLength &&
+        prev.signals.every(
+          (signal, index) =>
+            signal.beaconId === signals[index]?.beaconId &&
+            signal.mac === signals[index]?.mac &&
+            signal.rssi === signals[index]?.rssi
+        );
+      if (sameContent) {
+        return prev;
+      }
+      return { ...prev, signals };
+    });
+  }, [deviceBeaconSignals, tooltip]);
+
+  useEffect(() => {
+    if (tooltip && !infoIconPositions.has(tooltip.deviceId)) {
+      setTooltip(null);
+    }
+  }, [infoIconPositions, tooltip]);
+
+  const tooltipDevice = useMemo(() => {
+    if (!tooltip) return null;
+    return devices.find((device) => device.devEUI === tooltip.deviceId) || null;
+  }, [tooltip, devices]);
 
   const drawRoom = () => {
     const canvas = canvasRef.current;
@@ -329,13 +881,77 @@ export default function Mode1Indoor() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const roomWidth = roomProfile.outline?.width ?? 1;
+    const roomHeight = roomProfile.outline?.height ?? 1;
+    const exitSpaceDepth = 1.0; // 奥行き1m
+    const exitSpaceWidth = 1.0; // 横幅1m
+
+    // 退室スペースを含めた描画範囲を計算
+    const exitSpaceMargin = exitSpaceDepth;
     const padding = 40;
+    
+    // ドアの位置から退室スペースの方向を計算
+    const doorOutside = roomProfile.calibrationPoints?.find(p => p.id === "door_outside");
+    const doorInside = roomProfile.calibrationPoints?.find(p => p.id === "door_inside");
+    let totalWidth = roomWidth;
+    let totalHeight = roomHeight;
+    let offsetX = 0;
+    let offsetY = 0;
+    let doorInsideActual: { x: number; y: number } | null = null;
+    let doorOutsideActual: { x: number; y: number } | null = null;
+    let doorNormal: { x: number; y: number } | null = null;
+    
+    if (doorOutside && doorInside) {
+      doorInsideActual = {
+        x: doorInside.position.x * roomWidth,
+        y: doorInside.position.y * roomHeight
+      };
+      doorOutsideActual = {
+        x: doorOutside.position.x * roomWidth,
+        y: doorOutside.position.y * roomHeight
+      };
+
+      // ドアの向きベクトル（実寸）
+      const doorVectorX = doorOutsideActual.x - doorInsideActual.x;
+      const doorVectorY = doorOutsideActual.y - doorInsideActual.y;
+      const doorVectorLength = Math.hypot(doorVectorX, doorVectorY) || 1;
+      doorNormal = {
+        x: doorVectorX / doorVectorLength,
+        y: doorVectorY / doorVectorLength
+      };
+      
+      // 退室スペースの最大範囲を計算（実寸）
+      const maxExitX = doorOutsideActual.x + doorNormal.x * exitSpaceMargin;
+      const maxExitY = doorOutsideActual.y + doorNormal.y * exitSpaceMargin;
+      const minExitX = doorOutsideActual.x - doorNormal.x * exitSpaceMargin;
+      const minExitY = doorOutsideActual.y - doorNormal.y * exitSpaceMargin;
+      
+      // 全体の描画範囲を計算（実寸）
+      const minX = Math.min(0, doorInsideActual.x, doorOutsideActual.x, minExitX, maxExitX);
+      const minY = Math.min(0, doorInsideActual.y, doorOutsideActual.y, minExitY, maxExitY);
+      const maxX = Math.max(roomWidth, doorInsideActual.x, doorOutsideActual.x, minExitX, maxExitX);
+      const maxY = Math.max(roomHeight, doorInsideActual.y, doorOutsideActual.y, minExitY, maxExitY);
+      
+      totalWidth = maxX - minX;
+      totalHeight = maxY - minY;
+      offsetX = -minX;
+      offsetY = -minY;
+    }
+    
     const width = canvas.width - padding * 2;
     const height = canvas.height - padding * 2;
 
-    const scaleX = width / roomProfile.outline!.width;
-    const scaleY = height / roomProfile.outline!.height;
+    const scaleX = width / totalWidth;
+    const scaleY = height / totalHeight;
     const scale = Math.min(scaleX, scaleY);
+    
+    // 実際に使用される描画領域の高さを計算
+    const actualDrawHeight = totalHeight * scale + padding * 2;
+    
+    // キャンバスの親要素の高さを調整
+    if (canvas.parentElement) {
+      canvas.parentElement.style.height = `${actualDrawHeight}px`;
+    }
 
     // クリア
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -343,33 +959,70 @@ export default function Mode1Indoor() {
     // 背景
     ctx.fillStyle = "#f5f7fa";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // 退室スペースの背景を描画（薄い赤色）
+    if (doorInsideActual && doorOutsideActual && doorNormal) {
+      ctx.fillStyle = "rgba(255, 107, 53, 0.1)";
+      
+      // ドアの中心位置を計算（ドアの描画と同じ位置）
+      const doorCenterX = (doorInsideActual.x + doorOutsideActual.x) / 2;
+      const doorCenterY = (doorInsideActual.y + doorOutsideActual.y) / 2;
+      const doorThickness = 0.05;
+
+      const exitX = (doorCenterX + offsetX) * scale + padding;
+      const exitY = (doorCenterY + offsetY) * scale + padding;
+      
+      ctx.save();
+      ctx.translate(exitX, exitY);
+      const angle = Math.atan2(doorNormal.y, doorNormal.x);
+      ctx.rotate(angle);
+      
+      ctx.fillRect(
+        doorThickness * scale / 2,
+        -exitSpaceWidth * scale / 2,
+        exitSpaceDepth * scale,
+        exitSpaceWidth * scale
+      );
+      ctx.restore();
+      
+      // 「退室スペース」ラベル
+      ctx.font = "12px sans-serif";
+      ctx.fillStyle = "#ff6b35";
+      ctx.textAlign = "center";
+      const labelDistance = (exitSpaceDepth / 2 + doorThickness / 2) * scale;
+      ctx.fillText(
+        "退室スペース",
+        exitX + doorNormal.x * labelDistance,
+        exitY + doorNormal.y * labelDistance
+      );
+    }
 
     // 部屋の輪郭
     ctx.strokeStyle = "#2c3e50";
     ctx.lineWidth = 3;
     ctx.strokeRect(
-      padding,
-      padding,
-      roomProfile.outline!.width * scale,
-      roomProfile.outline!.height * scale
+      padding + offsetX * scale,
+      padding + offsetY * scale,
+      roomWidth * scale,
+      roomHeight * scale
     );
 
     // グリッド線（最背面）
     ctx.strokeStyle = "#e1e8ed";
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
-    for (let i = 1; i < roomProfile.outline!.width; i++) {
-      const x = padding + i * scale;
+    for (let i = 1; i < roomWidth; i++) {
+      const x = padding + (i + offsetX) * scale;
       ctx.beginPath();
-      ctx.moveTo(x, padding);
-      ctx.lineTo(x, padding + roomProfile.outline!.height * scale);
+      ctx.moveTo(x, padding + offsetY * scale);
+      ctx.lineTo(x, padding + (roomHeight + offsetY) * scale);
       ctx.stroke();
     }
-    for (let i = 1; i < roomProfile.outline!.height; i++) {
-      const y = padding + i * scale;
+    for (let i = 1; i < roomHeight; i++) {
+      const y = padding + (i + offsetY) * scale;
       ctx.beginPath();
-      ctx.moveTo(padding, y);
-      ctx.lineTo(padding + roomProfile.outline!.width * scale, y);
+      ctx.moveTo(padding + offsetX * scale, y);
+      ctx.lineTo(padding + (roomWidth + offsetX) * scale, y);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -378,8 +1031,8 @@ export default function Mode1Indoor() {
     if (roomProfile.furniture && roomProfile.furniture.length > 0) {
       console.log('Drawing furniture:', roomProfile.furniture.length);
       roomProfile.furniture.forEach(furniture => {
-        if (furniture.type === 'door') {
-          // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
+        // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
+        if (furniture.type === 'door' as any) {
           return;
         }
         const furnitureType = FURNITURE_TYPES[furniture.type as keyof typeof FURNITURE_TYPES];
@@ -387,13 +1040,13 @@ export default function Mode1Indoor() {
         
         ctx.fillStyle = furnitureColor;
         // 正規化座標（0-1）× ルームサイズ = 実際のメートル位置
-        const furnitureX = furniture.position.x * roomProfile.outline!.width;
-        const furnitureY = furniture.position.y * roomProfile.outline!.height;
-        const furnitureW = furniture.width * roomProfile.outline!.width;
-        const furnitureH = furniture.height * roomProfile.outline!.height;
+        const furnitureX = furniture.position.x * roomWidth;
+        const furnitureY = furniture.position.y * roomHeight;
+        const furnitureW = furniture.width * roomWidth;
+        const furnitureH = furniture.height * roomHeight;
 
-        const x = padding + furnitureX * scale;
-        const y = padding + furnitureY * scale;
+        const x = padding + (furnitureX + offsetX) * scale;
+        const y = padding + (furnitureY + offsetY) * scale;
         const w = furnitureW * scale;
         const h = furnitureH * scale;
 
@@ -434,55 +1087,24 @@ export default function Mode1Indoor() {
       );
 
       if (doorInside && doorOutside) {
+        const doorInsideActual = {
+          x: doorInside.position.x * roomWidth,
+          y: doorInside.position.y * roomHeight
+        };
+        const doorOutsideActual = {
+          x: doorOutside.position.x * roomWidth,
+          y: doorOutside.position.y * roomHeight
+        };
+
         // ドアの中心位置を計算
         const doorCenterX =
-          (doorInside.position.x + doorOutside.position.x) / 2;
+          (doorInsideActual.x + doorOutsideActual.x) / 2;
         const doorCenterY =
-          (doorInside.position.y + doorOutside.position.y) / 2;
+          (doorInsideActual.y + doorOutsideActual.y) / 2;
 
         // ドアの向きを計算（内側→外側のベクトル）
-        const doorVectorX = doorOutside.position.x - doorInside.position.x;
-        const doorVectorY = doorOutside.position.y - doorInside.position.y;
-        const doorAngle = Math.atan2(doorVectorY, doorVectorX);
-
-        // ドアのサイズ（メートル単位）
-        const doorWidth = 0.9; // 0.9m幅
-        const doorThickness = 0.05; // 5cm厚
-
-        // メートル位置に変換
-        const doorDisplayX = doorCenterX * roomProfile.outline!.width;
-        const doorDisplayY = doorCenterY * roomProfile.outline!.height;
-
-        const x = padding + doorDisplayX * scale;
-        const y = padding + doorDisplayY * scale;
-
-        // ドアを描画（回転を考慮）
-        ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(doorAngle + Math.PI / 2); // ベクトルに垂直
-
-        // ドアの矩形（幅0.9m、厚さ5cm）
-        const doorW = doorWidth * scale;
-        const doorH = doorThickness * scale;
-
-        ctx.fillStyle = "#D2691E";
-        ctx.fillRect(-doorW / 2, -doorH / 2, doorW, doorH);
-
-        // ドアの境界線
-        ctx.strokeStyle = "#8B4513";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-doorW / 2, -doorH / 2, doorW, doorH);
-
-        // ドアノブ（小さい円）
-        ctx.beginPath();
-        ctx.arc(doorW / 2 - 10, 0, 4, 0, Math.PI * 2);
-        ctx.fillStyle = "#FFD700";
-        ctx.fill();
-        ctx.strokeStyle = "#DAA520";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.restore();
+        const x = padding + (doorCenterX + offsetX) * scale;
+        const y = padding + (doorCenterY + offsetY) * scale;
 
         // ドアアイコンとラベル
         ctx.font = "bold 16px sans-serif";
@@ -501,18 +1123,153 @@ export default function Mode1Indoor() {
       }
     }
 
+    if (
+      showRssiOverlay &&
+      roomProfile.calibrationPoints &&
+      roomProfile.calibrationPoints.length > 0
+    ) {
+      const previousTextAlign = ctx.textAlign;
+      const previousTextBaseline = ctx.textBaseline;
+      const previousFont = ctx.font;
+
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.font = "11px sans-serif";
+
+      roomProfile.calibrationPoints.forEach((point) => {
+        if (!point.measurements || point.measurements.length === 0) {
+          return;
+        }
+
+        const stats = new Map<
+          string,
+          {
+            sum: number;
+            count: number;
+          }
+        >();
+
+        point.measurements.forEach((measurement) => {
+          if (!measurement.rssiValues) {
+            return;
+          }
+
+          Object.entries(measurement.rssiValues).forEach(([mac, rssi]) => {
+            if (typeof rssi !== "number" || Number.isNaN(rssi)) {
+              return;
+            }
+
+            const normalizedMac = mac.toUpperCase().replace(/:/g, "");
+            const current = stats.get(normalizedMac) || { sum: 0, count: 0 };
+            current.sum += rssi;
+            current.count += 1;
+            stats.set(normalizedMac, current);
+          });
+        });
+
+        if (stats.size === 0) {
+          return;
+        }
+
+        const entries = Array.from(stats.entries())
+          .map(([mac, { sum, count }]) => {
+            const average = sum / Math.max(count, 1);
+            const beaconInfo = getBeaconInfo(mac);
+            const label = selectBeaconLabel(
+              beaconInfo
+                ? {
+                    name: beaconInfo.name ?? null,
+                    beaconId: beaconInfo.beaconId ?? null,
+                  }
+                : undefined,
+              mac
+            );
+            return {
+              mac,
+              name: label,
+              average: Math.round(average),
+              count,
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+
+        const lines = [
+          `${point.label}`,
+          ...entries.map(
+            (entry) =>
+              `${entry.name}: ${entry.average}dBm${
+                entry.count > 1 ? ` (${entry.count})` : ""
+              }`
+          ),
+        ];
+
+        const lineHeight = 14;
+        const textWidths = lines.map((line) => ctx.measureText(line).width);
+        const boxWidth = Math.max(...textWidths, 0) + 12;
+        const boxHeight = lines.length * lineHeight + 8;
+
+        const normalizedX = point.position.x;
+        const normalizedY = point.position.y;
+
+        const pointX =
+          padding + (normalizedX * roomWidth + offsetX) * scale;
+        const pointY =
+          padding + (normalizedY * roomHeight + offsetY) * scale;
+
+        // マーカー
+        ctx.beginPath();
+        ctx.arc(pointX, pointY, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#1abc9c";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        let boxX = pointX + 12;
+        if (boxX + boxWidth > canvas.width - padding) {
+          boxX = pointX - boxWidth - 12;
+        }
+        boxX = Math.max(boxX, padding);
+
+        let boxY = pointY - boxHeight / 2;
+        if (boxY < padding) {
+          boxY = padding;
+        }
+        if (boxY + boxHeight > canvas.height - padding) {
+          boxY = canvas.height - padding - boxHeight;
+        }
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.strokeStyle = "#1abc9c";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+        ctx.fillStyle = "#34495e";
+        lines.forEach((line, index) => {
+          ctx.fillText(line, boxX + 6, boxY + 4 + lineHeight * index);
+        });
+      });
+
+      ctx.textAlign = previousTextAlign;
+      ctx.textBaseline = previousTextBaseline;
+      ctx.font = previousFont;
+    }
+
+    const iconPositions = new Map<string, { x: number; y: number; radius: number }>();
+
     // デバイスの位置を描画（最前面）
     if (devicePositions.size > 0) {
       console.log("Drawing devices:", devicePositions.size);
       devicePositions.forEach((position, deviceId) => {
         const device = devices.find((d) => d.devEUI === deviceId);
 
-        // 位置座標を変換：正規化座標（0-1）× ルームサイズ（メートル）
-        const displayX = position.x * roomProfile.outline!.width;
-        const displayY = position.y * roomProfile.outline!.height;
+        // 位置座標を変換：position.x/yは既に実際のメートル位置
+        const displayX = position.x;
+        const displayY = position.y;
 
-        const x = padding + displayX * scale;
-        const y = padding + displayY * scale;
+        const x = padding + (displayX + offsetX) * scale;
+        const y = padding + (displayY + offsetY) * scale;
 
         // デバイスの影
         ctx.beginPath();
@@ -555,16 +1312,36 @@ export default function Mode1Indoor() {
         ctx.fillStyle = "#2c3e50";
         ctx.fillText(deviceName, x, y - 30);
 
-        // 位置座標（正規化座標 × ルームサイズ = 実際のメートル位置）
-        ctx.font = "10px sans-serif";
-        ctx.fillStyle = "#7f8c8d";
-        ctx.fillText(
-          `(${displayX.toFixed(1)}m, ${displayY.toFixed(1)}m)`,
-          x,
-          y + 25
-        );
+        const labelAlign = ctx.textAlign;
+        const labelBaseline = ctx.textBaseline;
+
+        const infoRadius = 8;
+        const infoOffset = textWidth / 2 + infoRadius + 6;
+        const infoX = x + infoOffset;
+        const infoY = y - 30;
+
+        ctx.beginPath();
+        ctx.arc(infoX, infoY, infoRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#34495e";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.font = "bold 10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText("i", infoX, infoY);
+
+        ctx.textAlign = labelAlign;
+        ctx.textBaseline = labelBaseline;
+
+        iconPositions.set(deviceId, { x: infoX, y: infoY, radius: infoRadius + 4 });
       });
     }
+
+    setInfoIconPositions(iconPositions);
 
     console.log("Room drawing completed");
   };
@@ -584,7 +1361,7 @@ export default function Mode1Indoor() {
 
       return () => clearTimeout(timer);
     }
-  }, [roomProfile, devicePositions, devices]);
+  }, [roomProfile, devicePositions, devices, showRssiOverlay]);
 
   if (loading) {
     return (
@@ -609,46 +1386,200 @@ export default function Mode1Indoor() {
         <h1 style={{ fontSize: "32px", fontWeight: "700", margin: 0 }}>
           機能1 : 室内位置追跡
         </h1>
-        <h2
-          style={{
-            fontSize: "24px",
-            fontWeight: "600",
-            color: "#2c3e50",
-            margin: 0,
-          }}
-        >
-          部屋: {roomProfile?.name || "未設定"}
-        </h2>
+        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          <h2
+            style={{
+              fontSize: "24px",
+              fontWeight: "600",
+              color: "#2c3e50",
+              margin: 0,
+            }}
+          >
+            部屋: {roomProfile?.name || "未設定"}
+          </h2>
+          <button
+            onClick={() => setShowLogPanel(!showLogPanel)}
+            style={{
+              padding: "8px 16px",
+              borderRadius: "8px",
+              border: "2px solid #4A90E2",
+              backgroundColor: showLogPanel ? "#4A90E2" : "white",
+              color: showLogPanel ? "white" : "#4A90E2",
+              fontSize: "14px",
+              fontWeight: "600",
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            ビーコンログ
+            {beaconLogs.length > 0 && (
+              <span
+                style={{
+                  backgroundColor: "#ff6b35",
+                  color: "white",
+                  borderRadius: "10px",
+                  padding: "2px 6px",
+                  fontSize: "12px",
+                  fontWeight: "bold",
+                }}
+              >
+                {beaconLogs.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
-      {alerts.map((alert) => (
-        <div key={alert.id} className="alert alert-danger">
+      {alerts.length > 0 && (
+        <div className="alert-stack">
+          {alerts.map((alert) => {
+            // アラートタイプに応じて背景色とアイコンを変更
+            const isShock = alert.type === "shock";
+            const alertStyle = {
+              backgroundColor: isShock ? "#dc3545" : "#ff6b35", // 衝撃: 濃い赤、退室: オレンジ
+              border: isShock ? "3px solid #a71d2a" : "3px solid #cc5529",
+              animation: isShock ? "pulse 0.5s ease-in-out infinite" : "none",
+            };
+            const alertIcon = isShock ? "💥 衝撃検知" : "🚪 部屋退室";
+            
+            return (
+              <div
+                key={alert.id}
+                className="alert alert-danger"
+                style={alertStyle}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: "18px" }}>{alertIcon}</strong>
+                    <p style={{ marginTop: "8px", fontSize: "16px" }}>
+                      {alert.message}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => dismissAlert(alert.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "white",
+                      fontSize: "24px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ビーコンログパネル */}
+      {showLogPanel && (
+        <div
+          className="card"
+          style={{
+            marginBottom: "24px",
+            maxHeight: "400px",
+            overflow: "auto",
+          }}
+        >
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
+              marginBottom: "12px",
             }}
           >
-            <div>
-              <strong>⚠️ 警告</strong>
-              <p style={{ marginTop: "8px" }}>{alert.message}</p>
-            </div>
+            <h3 style={{ margin: 0 }}>ビーコン受信ログ</h3>
             <button
-              onClick={() => dismissAlert(alert.id)}
+              onClick={() => setBeaconLogs([])}
               style={{
-                background: "transparent",
-                border: "none",
-                color: "white",
-                fontSize: "24px",
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "1px solid #95a5a6",
+                backgroundColor: "white",
+                color: "#95a5a6",
+                fontSize: "12px",
                 cursor: "pointer",
               }}
             >
-              ×
+              ログをクリア
             </button>
           </div>
+          {beaconLogs.length === 0 ? (
+            <p style={{ color: "#95a5a6", textAlign: "center", padding: "20px" }}>
+              ログはありません
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {beaconLogs.map((log) => (
+                <div
+                  key={log.id}
+                  style={{
+                    padding: "12px",
+                    border: "1px solid #e1e8ed",
+                    borderRadius: "8px",
+                    backgroundColor: "#f8f9fa",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    <strong style={{ color: "#2c3e50" }}>
+                      {log.deviceName}
+                    </strong>
+                    <span style={{ fontSize: "12px", color: "#95a5a6" }}>
+                      {formatTimestamp(log.timestamp)}
+                    </span>
+                  </div>
+                  {log.missingBeacons.length > 0 && (
+                    <div
+                      style={{
+                        backgroundColor: "#fff3cd",
+                        border: "1px solid #ffc107",
+                        borderRadius: "6px",
+                        padding: "8px",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          color: "#856404",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        ⚠️ 受信できなかったビーコン:
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#856404" }}>
+                        {log.missingBeacons
+                          .map((b) => `${b.beaconName} (${b.mac})`)
+                          .join(", ")}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      ))}
+      )}
 
       <div
         style={{
@@ -671,6 +1602,15 @@ export default function Mode1Indoor() {
             {devices.map((device) => {
               const position = devicePositions.get(device.devEUI);
               const timestamp = deviceTimestamps.get(device.devEUI);
+              const lastUpdateMs = timestamp ? Date.parse(timestamp) : NaN;
+              const isStale =
+                Number.isFinite(lastUpdateMs) &&
+                Date.now() - lastUpdateMs >= STALE_THRESHOLD_MS;
+              const statusColor = isStale
+                ? "#f39c12"
+                : position
+                ? "#50C878"
+                : "#95a5a6";
               return (
                 <div
                   key={device.devEUI}
@@ -694,18 +1634,7 @@ export default function Mode1Indoor() {
                         ({device.deviceId})
                       </span>
                     </div>
-                    {position && (
-                      <p
-                        style={{
-                          fontSize: "12px",
-                          marginTop: "4px",
-                          color: "#7f8c8d",
-                        }}
-                      >
-                        位置: ({position.x.toFixed(2)}m, {position.y.toFixed(2)}
-                        m)
-                      </p>
-                    )}
+
                     {timestamp && (
                       <p
                         style={{
@@ -723,49 +1652,13 @@ export default function Mode1Indoor() {
                       width: "12px",
                       height: "12px",
                       borderRadius: "50%",
-                      backgroundColor: position ? "#50C878" : "#95a5a6",
+                      backgroundColor: statusColor,
                       marginTop: "4px",
                     }}
                   />
                 </div>
               );
             })}
-          </div>
-
-          <div className="card">
-            <h3 style={{ marginBottom: "12px" }}>設定</h3>
-            <div className="form-group">
-              <label className="form-label">部屋退出時の警告</label>
-              <button
-                onClick={() => setAlertOnExit(!alertOnExit)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 16px",
-                  borderRadius: "20px",
-                  border: "none",
-                  fontSize: "14px",
-                  fontWeight: "500",
-                  cursor: "pointer",
-                  transition: "all 0.3s ease",
-                  backgroundColor: alertOnExit ? "#50C878" : "#E0E0E0",
-                  color: alertOnExit ? "white" : "#666",
-                }}
-              >
-                <div
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    backgroundColor: "white",
-                    transition: "transform 0.3s ease",
-                    transform: alertOnExit ? "translateX(0)" : "translateX(0)",
-                  }}
-                />
-                {alertOnExit ? "有効" : "無効"}
-              </button>
-            </div>
           </div>
         </div>
 
@@ -775,7 +1668,6 @@ export default function Mode1Indoor() {
             style={{
               position: "relative",
               width: "100%",
-              height: window.innerWidth <= 768 ? "400px" : "600px",
             }}
           >
             <canvas
@@ -784,11 +1676,72 @@ export default function Mode1Indoor() {
               height={600}
               style={{
                 width: "100%",
-                height: "100%",
+                height: "auto",
                 border: "1px solid #e1e8ed",
                 borderRadius: "8px",
               }}
             />
+            {tooltip && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: tooltip.left,
+                  top: tooltip.top,
+                  transform: "translate(-50%, -100%)",
+                  backgroundColor: "rgba(44, 62, 80, 0.92)",
+                  color: "#ffffff",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  boxShadow: "0 8px 16px rgba(0, 0, 0, 0.15)",
+                  pointerEvents: "none",
+                  maxWidth: "250px",
+                  backdropFilter: "blur(4px)",
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: tooltip.signals.length > 0 ? "6px" : "0" }}>
+                  {tooltipDevice?.userName ||
+                    tooltipDevice?.deviceId ||
+                    tooltip.deviceId}
+                </div>
+                {tooltip.signals.length > 0 ? (
+                  <ul
+                    style={{
+                      padding: 0,
+                      margin: 0,
+                      listStyle: "none",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {tooltip.signals.map((signal) => (
+                      <li
+                        key={`${signal.mac}-${signal.beaconId}-${signal.rssi}`}
+                      >
+                        <span style={{ fontWeight: 500 }}>
+                          {signal.beaconId}
+                        </span>
+                        <span
+                          style={{
+                            marginLeft: "6px",
+                            color: "rgba(255, 255, 255, 0.75)",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {signal.mac}
+                        </span>
+                        <span style={{ marginLeft: "8px", color: "#ecf0f1" }}>
+                          {signal.rssi} dBm
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span style={{ color: "rgba(255, 255, 255, 0.7)" }}>
+                    ビーコンを受信していません
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

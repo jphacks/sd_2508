@@ -197,9 +197,9 @@ export default function Management() {
 
   return (
     <div className="container">
-      <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-        管理画面
-      </h1>
+      {/* <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
+        デバイス管理
+      </h1> */}
 
       <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
         <button

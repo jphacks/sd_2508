@@ -80,6 +80,7 @@ export interface RoomProfile {
   roomId: string;
   name: string;
   beacons: string[]; // beaconIdの配列
+  doorBeaconId?: string | null;
   calibrationPoints: CalibrationPoint[];
   outline?: { width: number; height: number }; // メートル単位（未指定の場合は正規化座標）
   furniture?: FurnitureItem[];

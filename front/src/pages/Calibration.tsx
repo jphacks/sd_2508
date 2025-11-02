@@ -79,35 +79,62 @@ const getFurnitureTypes = (roomWidth: number, roomHeight: number) => {
     desk: { width: 0.3, height: 0.2 },
     tv: { width: 0.3, height: 0.05 },
     piano: { width: 0.2, height: 0.15 },
-    chair: { width: 0.05, height: 0.05 }
+    chair: { width: 0.05, height: 0.05 },
   };
 
-  // 正規化座標に変換
+  const BASE_ROOM = { width: 5, height: 5 };
+  const MAX_RATIO = 0.8; // 部屋の 80% までを上限に拡大
+  const MIN_RATIO = 0.1; // 最低でも部屋の 10% の大きさを確保
+
+  const normalizeSize = (
+    baseWidth: number,
+    baseHeight: number
+  ): { width: number; height: number } => {
+    const safeRoomWidth = roomWidth > 0 ? roomWidth : 1;
+    const safeRoomHeight = roomHeight > 0 ? roomHeight : 1;
+
+    const widthScale = Math.max(1, safeRoomWidth / BASE_ROOM.width);
+    const heightScale = Math.max(1, safeRoomHeight / BASE_ROOM.height);
+
+    const scaledWidth = baseWidth * widthScale;
+    const scaledHeight = baseHeight * heightScale;
+
+    const actualWidth = Math.max(
+      Math.min(scaledWidth, safeRoomWidth * MAX_RATIO),
+      safeRoomWidth * MIN_RATIO
+    );
+    const actualHeight = Math.max(
+      Math.min(scaledHeight, safeRoomHeight * MAX_RATIO),
+      safeRoomHeight * MIN_RATIO
+    );
+
+    return {
+      width: actualWidth / safeRoomWidth,
+      height: actualHeight / safeRoomHeight,
+    };
+  };
+
   return {
-    desk: { 
-      label: '机', 
-      width: baseSizes.desk.width / roomWidth, 
-      height: baseSizes.desk.height / roomHeight, 
-      color: '#8B4513' 
+    desk: {
+      label: '机',
+      ...normalizeSize(baseSizes.desk.width, baseSizes.desk.height),
+      color: '#8B4513',
     },
-    tv: { 
-      label: 'テレビ', 
-      width: baseSizes.tv.width / roomWidth, 
-      height: baseSizes.tv.height / roomHeight, 
-      color: '#2C3E50' 
+    tv: {
+      label: 'テレビ',
+      ...normalizeSize(baseSizes.tv.width, baseSizes.tv.height),
+      color: '#2C3E50',
     },
-    piano: { 
-      label: 'ピアノ', 
-      width: baseSizes.piano.width / roomWidth, 
-      height: baseSizes.piano.height / roomHeight, 
-      color: '#1A1A1A' 
+    piano: {
+      label: 'ピアノ',
+      ...normalizeSize(baseSizes.piano.width, baseSizes.piano.height),
+      color: '#1A1A1A',
     },
-    chair: { 
-      label: '椅子', 
-      width: baseSizes.chair.width / roomWidth, 
-      height: baseSizes.chair.height / roomHeight, 
-      color: '#CD853F' 
-    }
+    chair: {
+      label: '椅子',
+      ...normalizeSize(baseSizes.chair.width, baseSizes.chair.height),
+      color: '#CD853F',
+    },
   } as const;
 };
 
@@ -122,6 +149,7 @@ export default function Calibration() {
   const [step, setStep] = useState(0);
   const [roomName, setRoomName] = useState('');
   const [selectedBeacons, setSelectedBeacons] = useState<string[]>([]);
+  const [doorBeaconId, setDoorBeaconId] = useState<string>('');
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
@@ -190,7 +218,7 @@ export default function Calibration() {
     // マップを描画
     drawMap();
   }, [
-    furniture.length,
+    furniture,
     selectedFurniture, 
     selectedBeacon,
     Object.keys(beaconPositions).length,
@@ -234,6 +262,7 @@ export default function Calibration() {
         setOriginalRoomData(roomData);
         setRoomName(roomData.name);
         setSelectedBeacons(roomData.beacons || []);
+        setDoorBeaconId(roomData.doorBeaconId || '');
         setFurniture(roomData.furniture || []);
         setCalibrationPoints(roomData.calibrationPoints || []);
         setIsEditMode(true);
@@ -283,6 +312,24 @@ export default function Calibration() {
       } as Beacon & { firestoreId: string };
     });
     setBeacons(data);
+  };
+
+  useEffect(() => {
+    if (selectedBeacons.length === 0) {
+      if (doorBeaconId) {
+        setDoorBeaconId('');
+      }
+      return;
+    }
+
+    if (!doorBeaconId || !selectedBeacons.includes(doorBeaconId)) {
+      setDoorBeaconId(selectedBeacons[0]);
+    }
+  }, [selectedBeacons, doorBeaconId]);
+
+  const getBeaconDisplayName = (firestoreId: string) => {
+    const beacon = beacons.find(b => b.firestoreId === firestoreId);
+    return beacon?.name || beacon?.beaconId || firestoreId;
   };
 
   // ドア位置を部屋の外枠上にスナップする関数
@@ -808,6 +855,11 @@ export default function Calibration() {
       alert('ビーコンが選択されていません');
       return;
     }
+    
+    if (!doorBeaconId) {
+      alert('ドア付近のビーコンが選択されていません');
+      return;
+    }
 
     // 部屋サイズの処理：入力されていればメートル単位、なければundefined
     const parsedWidth = roomWidth ? parseFloat(roomWidth) : null;
@@ -851,6 +903,7 @@ export default function Calibration() {
     const roomProfile: Partial<RoomProfile> = {
       name: roomName,
       beacons: selectedBeacons,
+      doorBeaconId: doorBeaconId || null,
       calibrationPoints: calibrationPoints,
       outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
       furniture: furniture,
@@ -889,26 +942,44 @@ export default function Calibration() {
     if (!canvas) return null;
 
     const rect = canvas.getBoundingClientRect();
-    const scale = 700;
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-
-    const x = item.position.x * scale;
-    const y = item.position.y * scale;
-    const width = item.width * scale;
-    const height = item.height * scale;
     const handleSize = 8;
 
+    const margin = showFurniture ? 0 : 0.15;
+    const safeWidth = Math.max(currentRoomSize.width, 0.0001);
+    const safeHeight = Math.max(currentRoomSize.height, 0.0001);
+    const widthAdjustment = 1 + 2 * margin / safeWidth;
+    const heightAdjustment = 1 + 2 * margin / safeHeight;
+
+    const startX = showFurniture
+      ? item.position.x * canvas.width
+      : ((item.position.x + margin / safeWidth) / widthAdjustment) * canvas.width;
+    const startY = showFurniture
+      ? item.position.y * canvas.height
+      : ((item.position.y + margin / safeHeight) / heightAdjustment) * canvas.height;
+
+    const widthPx = showFurniture
+      ? item.width * canvas.width
+      : (item.width / widthAdjustment) * canvas.width;
+    const heightPx = showFurniture
+      ? item.height * canvas.height
+      : (item.height / heightAdjustment) * canvas.height;
+
     const handles = [
-      { x: x + width - handleSize/2, y: y + height - handleSize/2, type: 'se' as const },
-      { x: x - handleSize/2, y: y + height - handleSize/2, type: 'sw' as const },
-      { x: x + width - handleSize/2, y: y - handleSize/2, type: 'ne' as const },
-      { x: x - handleSize/2, y: y - handleSize/2, type: 'nw' as const }
+      { x: startX + widthPx - handleSize / 2, y: startY + heightPx - handleSize / 2, type: 'se' as const },
+      { x: startX - handleSize / 2, y: startY + heightPx - handleSize / 2, type: 'sw' as const },
+      { x: startX + widthPx - handleSize / 2, y: startY - handleSize / 2, type: 'ne' as const },
+      { x: startX - handleSize / 2, y: startY - handleSize / 2, type: 'nw' as const },
     ];
 
     for (const handle of handles) {
-      if (mouseX >= handle.x && mouseX <= handle.x + handleSize &&
-          mouseY >= handle.y && mouseY <= handle.y + handleSize) {
+      if (
+        mouseX >= handle.x &&
+        mouseX <= handle.x + handleSize &&
+        mouseY >= handle.y &&
+        mouseY <= handle.y + handleSize
+      ) {
         return handle.type;
       }
     }
@@ -1045,11 +1116,13 @@ export default function Calibration() {
         const x = Math.max(0, Math.min(1 - selectedItem.width, mouseX - selectedItem.width / 2));
         const y = Math.max(0, Math.min(1 - selectedItem.height, mouseY - selectedItem.height / 2));
 
-        setFurniture(prev => prev.map(item =>
-          item.id === selectedFurniture
-            ? { ...item, position: { x, y } }
-            : item
-        ));
+        setFurniture(prev =>
+          prev.map(item =>
+            item.id === selectedFurniture
+              ? { ...item, position: { x, y } }
+              : item
+          )
+        );
       }
       return;
     }
@@ -1064,7 +1137,7 @@ export default function Calibration() {
       let newX = selectedItem.position.x;
       let newY = selectedItem.position.y;
 
-      const minSize = 0.02;
+      const minSize = 0.05;
       const maxSize = 0.5;
 
       switch (resizeHandle) {
@@ -1387,10 +1460,34 @@ export default function Calibration() {
                 ))}
               </div>
             </div>
+            <div className="form-group">
+              <label className="form-label">ドア付近のビーコン *</label>
+              <select
+                className="form-input"
+                value={doorBeaconId}
+                onChange={(e) => setDoorBeaconId(e.target.value)}
+                disabled={selectedBeacons.length === 0}
+              >
+                {selectedBeacons.length === 0 && (
+                  <option value="">ビーコンを選択してください</option>
+                )}
+                {selectedBeacons.length > 0 && !doorBeaconId && (
+                  <option value="">ビーコンを選択してください</option>
+                )}
+                {selectedBeacons.map(id => (
+                  <option key={id} value={id}>
+                    {getBeaconDisplayName(id)}
+                  </option>
+                ))}
+              </select>
+              <p style={{ marginTop: '8px', fontSize: '12px', color: '#7f8c8d' }}>
+                退室判定に使用するため、ドア付近に設置するビーコンを1台選択してください。
+              </p>
+            </div>
             <button
               className="btn btn-primary"
               onClick={() => setStep(1)}
-              disabled={!roomName || selectedBeacons.length !== 3}
+              disabled={!roomName || selectedBeacons.length !== 3 || !doorBeaconId}
             >
               次へ
             </button>
@@ -1548,6 +1645,22 @@ export default function Calibration() {
                     📐 <strong>正規化座標:</strong> ({CALIBRATION_STEPS[step - 1].position.x.toFixed(3)}, {CALIBRATION_STEPS[step - 1].position.y.toFixed(3)})<br />
                     {CALIBRATION_STEPS[step - 1].id === 'door_inside' && <span>🚪 ドア位置から部屋内側（{doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)}から内側）で測定してください</span>}
                     {CALIBRATION_STEPS[step - 1].id === 'door_outside' && <span>🚪 ドア位置から部屋外側（{doorPosition.x.toFixed(3)}, {doorPosition.y.toFixed(3)}から外側）で測定してください</span>}
+                  </p>
+                </div>
+
+                {/* 測定姿勢の指示 */}
+                <div style={{ 
+                  marginBottom: '16px', 
+                  padding: '12px', 
+                  backgroundColor: '#E8F5E9', 
+                  borderRadius: '6px',
+                  border: '1px solid #4CAF50'
+                }}>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#2E7D32' }}>
+                    <strong>測定時の姿勢:</strong><br />
+                    • トラッカーを胸の高さで持ってください<br />
+                    • <strong>🚪 出口の方を向いて</strong>測定してください<br />
+                    • 測定中は動かないでください
                   </p>
                 </div>
 

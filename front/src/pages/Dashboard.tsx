@@ -66,8 +66,8 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode1' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode1')}
         >
-          <h3 style={{ fontSize: '24px' }}>機能1</h3>
-          <p style={{ fontSize: '14px', marginTop: '8px' }}>室内位置追跡</p>
+          <h3 style={{ fontSize: '24px' }}>部屋退出検知</h3>
+          <p style={{ fontSize: '14px', marginTop: '8px' }}>機能1</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
             BLE×3で部屋内の位置を把握
           </p>
@@ -77,8 +77,8 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode2' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode2')}
         >
-          <h3 style={{ fontSize: '24px' }}>機能2</h3>
-          <p style={{ fontSize: '14px', marginTop: '8px' }}>バス置き去り検知</p>
+          <h3 style={{ fontSize: '24px' }}>バス置き去り検知</h3>
+          <p style={{ fontSize: '14px', marginTop: '8px' }}>機能2</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
             BLE×1で置き去りを検知
           </p>
@@ -88,8 +88,8 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode3' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode3')}
         >
-          <h3 style={{ fontSize: '24px' }}>機能3</h3>
-          <p style={{ fontSize: '14px', marginTop: '8px' }}>屋外GPS追跡</p>
+          <h3 style={{ fontSize: '24px' }}>屋外はぐれ検知</h3>
+          <p style={{ fontSize: '14px', marginTop: '8px' }}>機能3</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
             GPSで保護者からの距離を確認
           </p>
