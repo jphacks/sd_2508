@@ -68,7 +68,7 @@ export default function Mode1Indoor() {
   const beaconNameMap = useMemo(() => {
     const map = new Map<
       string,
-      { beaconId?: string }
+      { beaconId?: string; name?: string }
     >();
     beacons.forEach((beacon) => {
       if (!beacon.mac) {
@@ -77,6 +77,7 @@ export default function Mode1Indoor() {
       const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
       map.set(normalizedMac, {
         beaconId: beacon.beaconId ?? undefined,
+        name: beacon.name ?? undefined,
       });
     });
     return map;
@@ -86,6 +87,7 @@ export default function Mode1Indoor() {
     info:
       | Partial<{
           beaconId: string | null;
+          name: string | null;
         }>
       | undefined,
     fallback: string
@@ -101,6 +103,7 @@ export default function Mode1Indoor() {
     const uniqueCandidates = Array.from(
       new Set(
         [
+          normalizeLabel(info?.name),
           normalizeLabel(info?.beaconId),
           normalizeLabel(fallback),
         ].filter((value): value is string => value !== null)
@@ -348,9 +351,14 @@ export default function Mode1Indoor() {
                         expectedBeaconByMac.get(normalizedMac);
                       const displayName = selectBeaconLabel(
                         {
+                          name:
+                            beaconInfoFromMap?.name ||
+                            expectedInfo?.beaconName ||
+                            null,
                           beaconId:
                             beaconInfoFromMap?.beaconId ||
-                            expectedInfo?.beaconId,
+                            expectedInfo?.beaconId ||
+                            null,
                         },
                         normalizedMac
                       );
@@ -1186,6 +1194,7 @@ export default function Mode1Indoor() {
             const label = selectBeaconLabel(
               beaconInfo
                 ? {
+                    name: beaconInfo.name ?? null,
                     beaconId: beaconInfo.beaconId ?? null,
                   }
                 : undefined,
