@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { ref, onValue } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { useLocation } from "react-router-dom";
@@ -25,6 +25,12 @@ interface BeaconLog {
   }>;
 }
 
+type BeaconSignal = {
+  beaconId: string;
+  mac: string;
+  rssi: number;
+};
+
 const FURNITURE_TYPES = {
   desk: { label: "机", width: 2, height: 1, color: "#8B4513" },
   tv: { label: "テレビ", width: 3, height: 0.5, color: "#2C3E50" },
@@ -40,12 +46,6 @@ export default function Mode1Indoor() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
   const beaconsRef = useRef<(Beacon & { firestoreId: string })[]>([]);
-  const beaconNameMapRef = useRef<
-    Map<
-      string,
-      { beaconId?: string; name?: string }
-    >
-  >(new Map());
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
   const [devicePositions, setDevicePositions] = useState<
     Map<string, { x: number; y: number }>
@@ -61,7 +61,7 @@ export default function Mode1Indoor() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [showRssiOverlay, setShowRssiOverlay] = useState(false);
   const [deviceBeaconSignals, setDeviceBeaconSignals] = useState<
-    Map<string, Array<{ name: string; rssi: number }>>
+    Map<string, BeaconSignal[]>
   >(new Map());
   const [infoIconPositions, setInfoIconPositions] = useState<
     Map<string, { x: number; y: number; radius: number }>
@@ -70,32 +70,26 @@ export default function Mode1Indoor() {
     deviceId: string;
     left: number;
     top: number;
-    signals: Array<{ name: string; rssi: number }>;
+    signals: BeaconSignal[];
   } | null>(null);
-  const beaconNameMap = useMemo(() => {
-    const map = new Map<
-      string,
-      { beaconId?: string; name?: string }
-    >();
-    beacons.forEach((beacon) => {
-      if (!beacon.mac) {
-        return;
-      }
-      const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
-      map.set(normalizedMac, {
-        beaconId: beacon.beaconId ?? undefined,
-        name: beacon.name ?? undefined,
-      });
-    });
-    return map;
-  }, [beacons]);
   useEffect(() => {
     beaconsRef.current = beacons;
   }, [beacons]);
 
-  useEffect(() => {
-    beaconNameMapRef.current = beaconNameMap;
-  }, [beaconNameMap]);
+  const getBeaconInfo = useCallback((mac: string) => {
+    const normalized = mac.toUpperCase().replace(/:/g, "");
+    const beacon = beaconsRef.current.find((b) => {
+      if (!b.mac) return false;
+      return b.mac.toUpperCase().replace(/:/g, "") === normalized;
+    });
+    if (!beacon) {
+      return null;
+    }
+    return {
+      beaconId: beacon.beaconId ?? undefined,
+      name: beacon.name ?? undefined,
+    };
+  }, []);
 
   const selectBeaconLabel = (
     info:
@@ -106,43 +100,13 @@ export default function Mode1Indoor() {
       | undefined,
     fallback: string
   ) => {
-    const normalizeLabel = (value?: string | null) => {
-      if (typeof value !== "string") {
-        return null;
-      }
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : null;
-    };
-
-    const nameCandidate = normalizeLabel(info?.name);
-    const idCandidate = normalizeLabel(info?.beaconId);
-    const fallbackCandidate = normalizeLabel(fallback);
-
-    const parts: string[] = [];
-
-    if (nameCandidate && nameCandidate !== idCandidate) {
-      parts.push(nameCandidate);
-    }
-
-    if (idCandidate) {
-      parts.push(idCandidate);
-    }
-
-    if (parts.length === 0) {
-      if (fallbackCandidate) {
-        parts.push(fallbackCandidate);
-      } else {
-        return fallback;
-      }
-    } else if (
-      fallbackCandidate &&
-      fallbackCandidate !== nameCandidate &&
-      fallbackCandidate !== idCandidate
-    ) {
-      parts.push(fallbackCandidate);
-    }
-
-    return parts.join(" → ");
+    const values = [info?.name, info?.beaconId, fallback]
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter(
+        (value, index, array) =>
+          value.length > 0 && array.indexOf(value) === index
+      );
+    return values.length > 0 ? values.join(" → ") : fallback;
   };
 
   useEffect(() => {
@@ -346,7 +310,7 @@ export default function Mode1Indoor() {
                 const expectedBeaconByMac = new Map(
                   expectedBeacons.map((beacon) => [beacon.mac, beacon])
                 );
-                const beaconSignals: Array<{ name: string; rssi: number }> = [];
+                const beaconSignals: BeaconSignal[] = [];
 
                 data.beacons.forEach((beacon: any) => {
                   if (beacon.mac && beacon.rssi) {
@@ -373,25 +337,16 @@ export default function Mode1Indoor() {
                         });
                       }
 
-                      const beaconInfoFromMap =
-                        beaconNameMapRef.current.get(normalizedMac);
+                      const beaconInfoFromMap = getBeaconInfo(normalizedMac);
                       const expectedInfo =
                         expectedBeaconByMac.get(normalizedMac);
-                      const displayName = selectBeaconLabel(
-                        {
-                          name:
-                            beaconInfoFromMap?.name ||
-                            expectedInfo?.beaconName ||
-                            null,
-                          beaconId:
-                            beaconInfoFromMap?.beaconId ||
-                            expectedInfo?.beaconId ||
-                            null,
-                        },
-                        normalizedMac
-                      );
+                      const beaconId =
+                        beaconInfoFromMap?.beaconId?.trim() ||
+                        expectedInfo?.beaconId?.trim() ||
+                        normalizedMac;
                       beaconSignals.push({
-                        name: displayName,
+                        beaconId,
+                        mac: normalizedMac,
                         rssi: beacon.rssi,
                       });
                     }
@@ -683,7 +638,7 @@ export default function Mode1Indoor() {
                 setDeviceBeaconSignals((prev) => {
                   const newMap = new Map(prev);
                   const sortedSignals = beaconSignals.sort((a, b) =>
-                    a.name.localeCompare(b.name, "ja")
+                    a.beaconId.localeCompare(b.beaconId, "ja")
                   );
                   newMap.set(device.devEUI, sortedSignals);
                   return newMap;
@@ -889,7 +844,8 @@ export default function Mode1Indoor() {
         sameLength &&
         prev.signals.every(
           (signal, index) =>
-            signal.name === signals[index]?.name &&
+            signal.beaconId === signals[index]?.beaconId &&
+            signal.mac === signals[index]?.mac &&
             signal.rssi === signals[index]?.rssi
         );
       if (sameContent) {
@@ -1218,7 +1174,7 @@ export default function Mode1Indoor() {
         const entries = Array.from(stats.entries())
           .map(([mac, { sum, count }]) => {
             const average = sum / Math.max(count, 1);
-            const beaconInfo = beaconNameMap.get(mac);
+            const beaconInfo = getBeaconInfo(mac);
             const label = selectBeaconLabel(
               beaconInfo
                 ? {
@@ -1758,8 +1714,21 @@ export default function Mode1Indoor() {
                     }}
                   >
                     {tooltip.signals.map((signal) => (
-                      <li key={`${signal.name}-${signal.rssi}`}>
-                        <span style={{ fontWeight: 500 }}>{signal.name}</span>
+                      <li
+                        key={`${signal.mac}-${signal.beaconId}-${signal.rssi}`}
+                      >
+                        <span style={{ fontWeight: 500 }}>
+                          {signal.beaconId}
+                        </span>
+                        <span
+                          style={{
+                            marginLeft: "6px",
+                            color: "rgba(255, 255, 255, 0.75)",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {signal.mac}
+                        </span>
                         <span style={{ marginLeft: "8px", color: "#ecf0f1" }}>
                           {signal.rssi} dBm
                         </span>
