@@ -39,6 +39,13 @@ export default function Mode1Indoor() {
   const location = useLocation();
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
+  const beaconsRef = useRef<(Beacon & { firestoreId: string })[]>([]);
+  const beaconNameMapRef = useRef<
+    Map<
+      string,
+      { beaconId?: string; name?: string }
+    >
+  >(new Map());
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
   const [devicePositions, setDevicePositions] = useState<
     Map<string, { x: number; y: number }>
@@ -82,6 +89,13 @@ export default function Mode1Indoor() {
     });
     return map;
   }, [beacons]);
+  useEffect(() => {
+    beaconsRef.current = beacons;
+  }, [beacons]);
+
+  useEffect(() => {
+    beaconNameMapRef.current = beaconNameMap;
+  }, [beaconNameMap]);
 
   const selectBeaconLabel = (
     info:
@@ -311,7 +325,7 @@ export default function Mode1Indoor() {
                 // ルームで使用するビーコンのリストを取得
                 const expectedBeacons = roomData.beacons
                   .map((beaconId) => {
-                    const beacon = beacons.find(
+                    const beacon = beaconsRef.current.find(
                       (b) => b.firestoreId === beaconId
                     );
                     if (beacon) {
@@ -360,7 +374,7 @@ export default function Mode1Indoor() {
                       }
 
                       const beaconInfoFromMap =
-                        beaconNameMap.get(normalizedMac);
+                        beaconNameMapRef.current.get(normalizedMac);
                       const expectedInfo =
                         expectedBeaconByMac.get(normalizedMac);
                       const displayName = selectBeaconLabel(
