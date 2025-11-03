@@ -60,6 +60,17 @@ export default function Mode1Indoor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const presenceStatusRef = useRef<Map<string, boolean>>(new Map());
+  const doorCalibrationAveragesRef = useRef<
+    Map<
+      string,
+      {
+        inside: number | null;
+        outside: number | null;
+        combined: number | null;
+        minDoor?: number | null;
+      }
+    >
+  >(new Map());
   const [showRssiOverlay, setShowRssiOverlay] = useState(false);
   const [deviceBeaconSignals, setDeviceBeaconSignals] = useState<
     Map<string, BeaconSignal[]>
@@ -113,6 +124,113 @@ export default function Mode1Indoor() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const computeDoorCalibrationAverages = useCallback((room: RoomProfile) => {
+    const result = new Map<
+      string,
+      {
+        inside: number | null;
+        outside: number | null;
+        combined: number | null;
+        minDoor?: number | null;
+      }
+    >();
+
+    if (!Array.isArray(room.calibrationPoints)) {
+      return result;
+    }
+
+    const doorInside = room.calibrationPoints.find(
+      (point) => point.id === "door_inside"
+    );
+    const doorOutside = room.calibrationPoints.find(
+      (point) => point.id === "door_outside"
+    );
+
+    const accumulator = new Map<
+      string,
+      { inside: number[]; outside: number[] }
+    >();
+
+    const collectValues = (
+      point: RoomProfile["calibrationPoints"][number] | undefined,
+      key: "inside" | "outside"
+    ) => {
+      if (!point || !Array.isArray(point.measurements)) {
+        return;
+      }
+
+      point.measurements.forEach((measurement) => {
+        if (!measurement || !measurement.rssiValues) {
+          return;
+        }
+
+        Object.entries(measurement.rssiValues).forEach(([mac, value]) => {
+          if (typeof value !== "number" || Number.isNaN(value)) {
+            return;
+          }
+
+          const normalizedMac = mac.toUpperCase().replace(/:/g, "");
+          let entry = accumulator.get(normalizedMac);
+          if (!entry) {
+            entry = { inside: [], outside: [] };
+            accumulator.set(normalizedMac, entry);
+          }
+          entry[key].push(value);
+        });
+      });
+    };
+
+    collectValues(doorInside, "inside");
+    collectValues(doorOutside, "outside");
+
+    const average = (values: number[]) =>
+      values.length > 0
+        ? values.reduce((sum, v) => sum + v, 0) / values.length
+        : null;
+
+    accumulator.forEach((values, mac) => {
+      const insideAvg = average(values.inside);
+      const outsideAvg = average(values.outside);
+      const combinedValues = [...values.inside, ...values.outside];
+      const combinedAvg = average(combinedValues);
+      let minDoor: number | null = null;
+      if (
+        doorInside &&
+        doorOutside &&
+        typeof insideAvg === "number" &&
+        typeof outsideAvg === "number"
+      ) {
+        minDoor = Math.min(insideAvg, outsideAvg);
+      }
+
+      if (
+        insideAvg !== null ||
+        outsideAvg !== null ||
+        combinedAvg !== null ||
+        minDoor !== null
+      ) {
+        result.set(mac, {
+          inside: insideAvg,
+          outside: outsideAvg,
+          combined: combinedAvg,
+          minDoor,
+        });
+      }
+    });
+
+    return result;
+  }, []);
+
+  useEffect(() => {
+    if (roomProfile) {
+      doorCalibrationAveragesRef.current = computeDoorCalibrationAverages(
+        roomProfile
+      );
+    } else {
+      doorCalibrationAveragesRef.current = new Map();
+    }
+  }, [roomProfile, computeDoorCalibrationAverages]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -421,68 +539,112 @@ export default function Mode1Indoor() {
                       entry !== null
                   );
 
+                const doorBeaconMacs = new Set(
+                  doorBeaconEntries.map((entry) => entry.mac)
+                );
+
                 let shouldForceOutside = false;
-                let exitReason: "door_beacon" | "fallback_rssi" | null = null;
-                let doorCheckDebug: any = null;
+                let exitReason: "calibration_majority" | "fallback_rssi" | null =
+                  null;
+                let calibrationCheckDebug: any = null;
                 let fallbackCheckDebug: any = null;
 
-                if (doorBeaconEntries.length > 0) {
-                  const doorIdsSet = new Set(
-                    doorBeaconEntries.map((entry) => entry.id)
-                  );
-                  const doorRssiDetails = doorBeaconEntries.map((entry) => ({
-                    ...entry,
-                    rssi: rssiMap[entry.mac],
-                  }));
-                  const availableDoorRssi = doorRssiDetails.filter(
-                    (
-                      detail
-                    ): detail is typeof detail & {
-                      rssi: number;
-                    } => typeof detail.rssi === "number"
-                  );
-                  const DOOR_RSSI_THRESHOLD = -80;
-                  const averageDoorRssi =
-                    availableDoorRssi.length > 0
-                      ? availableDoorRssi.reduce(
-                          (sum, detail) => sum + detail.rssi,
-                          0
-                        ) / availableDoorRssi.length
-                      : null;
-                  const hasOtherBeaconSignal = receivedBeacons.some(
-                    (b) => !doorIdsSet.has(b.beaconId)
-                  );
-                  const allDoorBeaconsMissing = availableDoorRssi.length === 0;
+                const calibrationAverages = doorCalibrationAveragesRef.current;
+                const calibrationComparisons = expectedBeacons
+                  .map((beaconInfo) => {
+                    const calibration = calibrationAverages.get(beaconInfo.mac);
+                    const currentRssi = rssiMap[beaconInfo.mac];
+                    return {
+                      beaconId: beaconInfo.beaconId,
+                      beaconName: beaconInfo.beaconName,
+                      mac: beaconInfo.mac,
+                      calibration,
+                      currentRssi,
+                      isDoorBeacon: doorBeaconMacs.has(beaconInfo.mac),
+                    };
+                  })
+                  .filter((entry) => {
+                    const hasCalibration =
+                      entry.calibration &&
+                      typeof entry.calibration.combined === "number";
+                    const hasCurrent = typeof entry.currentRssi === "number";
+                    return hasCalibration && hasCurrent;
+                  });
 
-                  const forcedByWeakSignal =
-                    averageDoorRssi !== null &&
-                    averageDoorRssi < DOOR_RSSI_THRESHOLD;
-                  const forcedByMissingDoor =
-                    allDoorBeaconsMissing && hasOtherBeaconSignal;
+                if (calibrationComparisons.length > 0) {
+                  const doorComparisons = calibrationComparisons.filter(
+                    (entry) => entry.isDoorBeacon
+                  );
+                  const nonDoorComparisons = calibrationComparisons.filter(
+                    (entry) => !entry.isDoorBeacon
+                  );
 
-                  shouldForceOutside = forcedByWeakSignal || forcedByMissingDoor;
-                  if (shouldForceOutside) {
-                    exitReason = "door_beacon";
+                  let doorBeaconSatisfied = false;
+                  if (doorComparisons.length > 0) {
+                    doorBeaconSatisfied = doorComparisons.every((entry) => {
+                      const minDoor = entry.calibration?.minDoor;
+                      if (typeof minDoor !== "number") {
+                        return false;
+                      }
+                      return (entry.currentRssi as number) >= minDoor;
+                    });
+                  } else {
+                    // ドアビーコンなしの場合は既存ロジックに任せる
+                    doorBeaconSatisfied = true;
                   }
 
-                  doorCheckDebug = {
-                    doorBeacons: doorRssiDetails.map((detail) => ({
-                      id: detail.id,
-                      mac: detail.mac,
-                      rssi: detail.rssi ?? null,
+                  const nonDoorBelowCount = nonDoorComparisons.filter(
+                    (entry) =>
+                      (entry.currentRssi as number) <=
+                      (entry.calibration?.combined as number)
+                  ).length;
+
+                  const nonDoorMajority =
+                    nonDoorComparisons.length > 0
+                      ? nonDoorBelowCount > nonDoorComparisons.length / 2
+                      : false;
+
+                  calibrationCheckDebug = {
+                    totalComparisons: calibrationComparisons.length,
+                    doorComparisons: doorComparisons.map((entry) => ({
+                      beaconId: entry.beaconId,
+                      beaconName: entry.beaconName,
+                      mac: entry.mac,
+                      currentRssi: entry.currentRssi,
+                      minDoor: entry.calibration?.minDoor ?? null,
                     })),
-                    averageDoorRssi,
-                    threshold: DOOR_RSSI_THRESHOLD,
-                    forcedByWeakSignal,
-                    forcedByMissingDoor,
-                    hasOtherBeaconSignal,
+                    doorBeaconSatisfied,
+                    nonDoorComparisons: nonDoorComparisons.map((entry) => ({
+                      beaconId: entry.beaconId,
+                      beaconName: entry.beaconName,
+                      mac: entry.mac,
+                      currentRssi: entry.currentRssi,
+                      combinedAvg: entry.calibration?.combined ?? null,
+                    })),
+                    nonDoorBelowCount,
+                    comparisons: calibrationComparisons.map((entry) => ({
+                      beaconId: entry.beaconId,
+                      beaconName: entry.beaconName,
+                      mac: entry.mac,
+                      currentRssi: entry.currentRssi,
+                      combinedAvg: entry.calibration?.combined ?? null,
+                      outsideAvg: entry.calibration?.outside ?? null,
+                      insideAvg: entry.calibration?.inside ?? null,
+                    })),
                   };
 
                   console.log(
-                    `🚪 ${device.deviceId} ドアビーコンRSSIチェック:`,
-                    doorCheckDebug
+                    `🚪 ${device.deviceId} ドアキャリブレーション比較:`,
+                    calibrationCheckDebug
                   );
-                } else {
+
+                  if (doorBeaconSatisfied && nonDoorMajority) {
+                    shouldForceOutside = true;
+                    exitReason = "calibration_majority";
+                  }
+                }
+
+                if (!shouldForceOutside) {
                   const fallbackBeaconMacs = expectedBeacons
                     .slice(0, 2)
                     .map((beacon) => beacon.mac);
@@ -574,7 +736,7 @@ export default function Mode1Indoor() {
 
                     console.log(`🚪 ${device.deviceId} 部屋外判定（RSSI閾値）:`, {
                       reason: exitReason,
-                      doorCheck: doorCheckDebug,
+                      calibrationCheck: calibrationCheckDebug,
                       fallbackCheck: fallbackCheckDebug,
                       doorCenterPosition: { x: doorCenterMeterX, y: doorCenterMeterY },
                       exitPosition: outsidePosition,
@@ -1149,7 +1311,7 @@ export default function Mode1Indoor() {
 
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.font = "11px sans-serif";
+      ctx.font = "9px sans-serif";
 
       roomProfile.calibrationPoints.forEach((point) => {
         if (!point.measurements || point.measurements.length === 0) {
@@ -1190,18 +1352,18 @@ export default function Mode1Indoor() {
           .map(([mac, { sum, count }]) => {
             const average = sum / Math.max(count, 1);
             const beaconInfo = getBeaconInfo(mac);
-            const label = selectBeaconLabel(
-              beaconInfo
-                ? {
-                    name: beaconInfo.name ?? null,
-                    beaconId: beaconInfo.beaconId ?? null,
-                  }
-                : undefined,
-              mac
-            );
+            // MACアドレスを除外してビーコン名またはbeaconIdのみを使用
+            let displayName = "";
+            if (beaconInfo?.name) {
+              displayName = beaconInfo.name;
+            } else if (beaconInfo?.beaconId) {
+              displayName = beaconInfo.beaconId;
+            } else {
+              displayName = "ビーコン";
+            }
             return {
               mac,
-              name: label,
+              name: displayName,
               average: Math.round(average),
               count,
             };
@@ -1218,7 +1380,7 @@ export default function Mode1Indoor() {
           ),
         ];
 
-        const lineHeight = 14;
+        const lineHeight = 11;
         const textWidths = lines.map((line) => ctx.measureText(line).width);
         const boxWidth = Math.max(...textWidths, 0) + 12;
         const boxHeight = lines.length * lineHeight + 8;
