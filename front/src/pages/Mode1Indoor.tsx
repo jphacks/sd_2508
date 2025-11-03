@@ -873,8 +873,9 @@ export default function Mode1Indoor() {
       }
     }
 
+    const alertId = `exit_room-${device.devEUI}`;
+    
     if (!isInside) {
-      const alertId = `exit_room-${device.devEUI}`;
       const alert: Alert = {
         id: alertId,
         type: "exit_room",
@@ -904,6 +905,9 @@ export default function Mode1Indoor() {
           setAlerts((prev) => prev.filter((a) => a.id !== alertId));
         }, 5000);
       }
+    } else {
+      // 部屋内に戻った場合はアラートを即座に削除
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
     }
   };
 
