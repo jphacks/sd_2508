@@ -37,34 +37,90 @@ export function estimatePositionByFingerprinting(
     return null;
   }
 
-  // 各キャリブレーションポイントとの類似度を計算（ユークリッド距離の逆数）
-  const similarities = calibrationPoints.map(point => {
-    // 最新の測定値を使用
-    if (point.measurements.length === 0) {
-      return { point, similarity: 0 };
+  const normalizeMac = (mac: string) => mac.toUpperCase().replace(/:/g, '');
+  const MISSING_SIGNAL_LEVEL = -100; // 未検出ビーコンの補完値
+  const SIMILARITY_DECAY = 0.15; // 類似度計算時の距離スケール調整係数
+
+  // 現在のRSSIを正規化済みのキーへ揃える
+  const normalizedCurrent: { [beaconMac: string]: number } = {};
+  Object.entries(currentRssi).forEach(([mac, value]) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return;
     }
-    
-    const latestMeasurement = point.measurements[point.measurements.length - 1];
-    const rssiValues = latestMeasurement.rssiValues;
-    
-    // ユークリッド距離を計算
-    let sumSquaredDiff = 0;
-    let count = 0;
-    
-    for (const [mac, currentValue] of Object.entries(currentRssi)) {
-      if (rssiValues[mac] !== undefined) {
-        sumSquaredDiff += Math.pow(currentValue - rssiValues[mac], 2);
-        count++;
+    normalizedCurrent[normalizeMac(mac)] = value;
+  });
+
+  const beaconSet = new Set<string>();
+  Object.keys(normalizedCurrent).forEach(mac => beaconSet.add(mac));
+
+  // キャリブレーション点ごとに測定値を平均化
+  const processedPoints = calibrationPoints
+    .map(point => {
+      const aggregates = new Map<string, { sum: number; count: number }>();
+
+      point.measurements.forEach(measurement => {
+        if (!measurement?.rssiValues) {
+          return;
+        }
+
+        Object.entries(measurement.rssiValues).forEach(([mac, value]) => {
+          if (typeof value !== 'number' || Number.isNaN(value)) {
+            return;
+          }
+          const normalizedMac = normalizeMac(mac);
+          const stats = aggregates.get(normalizedMac) || { sum: 0, count: 0 };
+          stats.sum += value;
+          stats.count += 1;
+          aggregates.set(normalizedMac, stats);
+        });
+      });
+
+      if (aggregates.size === 0) {
+        return null;
       }
-    }
-    
-    if (count === 0) {
+
+      const averagedRssi: { [mac: string]: number } = {};
+      aggregates.forEach((stats, mac) => {
+        averagedRssi[mac] = stats.sum / Math.max(stats.count, 1);
+        beaconSet.add(mac);
+      });
+
+      return { point, averagedRssi };
+    })
+    .filter((item): item is { point: CalibrationPoint; averagedRssi: { [mac: string]: number } } => item !== null);
+
+  if (processedPoints.length === 0) {
+    return null;
+  }
+
+  const beaconKeys = Array.from(beaconSet);
+  if (beaconKeys.length === 0) {
+    return null;
+  }
+
+  // 類似度の計算
+  // 各キャリブレーションポイントとの類似度を計算（ユークリッド距離の逆数）
+  const similarities = processedPoints.map(({ point, averagedRssi }) => {
+    let sumSquaredDiff = 0;
+    const featureCount = beaconKeys.length;
+
+    beaconKeys.forEach(mac => {
+      const currentValue = normalizedCurrent[mac] ?? MISSING_SIGNAL_LEVEL;
+      const calibrationValue = averagedRssi[mac] ?? MISSING_SIGNAL_LEVEL;
+      const diff = currentValue - calibrationValue;
+      sumSquaredDiff += diff * diff;
+    });
+
+    if (featureCount === 0) {
       return { point, similarity: 0 };
     }
-    
-    const euclideanDistance = Math.sqrt(sumSquaredDiff / count);
-    const similarity = 1 / (1 + euclideanDistance);
-    
+
+    // 平均二乗誤差 (RMS) を距離とする
+    const euclideanDistance = Math.sqrt(sumSquaredDiff / featureCount);
+
+    // 距離を指数関数で類似度に変換（スケール調整済み）
+    const similarity = Math.exp(-SIMILARITY_DECAY * euclideanDistance);
+
     return { point, similarity };
   });
 
