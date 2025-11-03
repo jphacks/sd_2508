@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { ref, onValue, set } from "firebase/database";
+import { ref, onValue, set, update } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
@@ -857,11 +857,23 @@ export default function Mode1Indoor() {
       const previous = presenceStatusRef.current.get(normalizedDeviceId);
       if (previous !== isInside) {
         presenceStatusRef.current.set(normalizedDeviceId, isInside);
-        const presenceRef = ref(rtdb, `devicePresence/${normalizedDeviceId}`);
-        set(presenceRef, {
-          deviceId: device.devEUI,
-          isInside,
-          updatedAt: new Date().toISOString()
+        const statusRef = ref(rtdb, `devices/${normalizedDeviceId}/status`);
+        
+        // 日本時間（JST、+09:00）のタイムスタンプを作成
+        const now = new Date();
+        const jstOffset = 9 * 60; // 日本時間のオフセット（分）
+        const jstTime = new Date(now.getTime() + jstOffset * 60 * 1000);
+        const year = jstTime.getUTCFullYear();
+        const month = String(jstTime.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(jstTime.getUTCDate()).padStart(2, '0');
+        const hours = String(jstTime.getUTCHours()).padStart(2, '0');
+        const minutes = String(jstTime.getUTCMinutes()).padStart(2, '0');
+        const seconds = String(jstTime.getUTCSeconds()).padStart(2, '0');
+        const timestamp = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+09:00`;
+        
+        update(statusRef, {
+          inside: isInside,
+          updatedAtInside: timestamp
         }).catch((error) => {
           console.error(`Presence update failed for ${device.devEUI}:`, error);
           if (typeof previous === "boolean") {
