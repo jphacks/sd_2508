@@ -234,25 +234,50 @@ export function calculateDistance(
 /**
  * GPS座標間の距離を計算（メートル）- Haversine formula
  */
-export function calculateGPSDistance(
+export const calculateGPSDistance = (
   lat1: number,
-  lon1: number,
+  lng1: number,
   lat2: number,
-  lon2: number
-): number {
-  const R = 6371e3; // 地球の半径（メートル）
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  lng2: number
+): number => {
+  // 入力値の検証
+  if (!isFinite(lat1) || !isFinite(lng1) || !isFinite(lat2) || !isFinite(lng2)) {
+    throw new Error('無効な座標値が渡されました');
+  }
+  
+  if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) {
+    throw new Error('緯度の値が範囲外です (-90°〜90°)');
+  }
+  
+  if (lng1 < -180 || lng1 > 180 || lng2 < -180 || lng2 > 180) {
+    throw new Error('経度の値が範囲外です (-180°〜180°)');
+  }
 
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  try {
+    const R = 6371000; // 地球の半径（メートル）
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
 
-  return R * c; // メートル単位の距離
-}
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    const distance = R * c;
+    
+    // 結果の検証
+    if (!isFinite(distance) || distance < 0) {
+      throw new Error('距離計算結果が無効です');
+    }
+    
+    return distance; // メートルで距離を返す
+  } catch (error) {
+    console.error('GPS距離計算エラー:', error);
+    throw error;
+  }
+};
 
 /**
  * 部屋の境界内にいるかチェック
