@@ -272,6 +272,15 @@ tbody tr:hover {
   left: 0;
   width: 100%;
   height: 100%;
+  box-sizing: border-box;
+  display: block;
+}
+
+canvas {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  display: block;
 }
 
 /* カードスタイル */
@@ -738,8 +747,11 @@ tbody tr:hover {
 
   /* キャンバスコンテナ */
   canvas {
+    width: 100%;
     max-width: 100%;
     height: auto !important;
+    box-sizing: border-box;
+    display: block;
   }
 
   /* フレックスボックスのレスポンシブ対応 */

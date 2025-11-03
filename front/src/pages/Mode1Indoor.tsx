@@ -946,13 +946,6 @@ export default function Mode1Indoor() {
     const scale = Math.min(scaleX, scaleY);
     
     // 実際に使用される描画領域の高さを計算
-    const actualDrawHeight = totalHeight * scale + padding * 2;
-    
-    // キャンバスの親要素の高さを調整
-    if (canvas.parentElement) {
-      canvas.parentElement.style.height = `${actualDrawHeight}px`;
-    }
-
     // クリア
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1663,24 +1656,21 @@ export default function Mode1Indoor() {
         </div>
 
         {/* 右側: 部屋表示パネル */}
-        <div className="card" style={{ flex: 1 }}>
-          <div
-            style={{
-              position: "relative",
-              width: "100%",
-            }}
-          >
-            <canvas
-              ref={canvasRef}
-              width={800}
-              height={600}
-              style={{
-                width: "100%",
-                height: "auto",
-                border: "1px solid #e1e8ed",
-                borderRadius: "8px",
-              }}
-            />
+        <div className="card" style={{ flex: 1, minWidth: 0 }}>
+          <div className="canvas-container" style={{ maxWidth: "100%" }}>
+            <div className="canvas-wrapper">
+              <canvas
+                ref={canvasRef}
+                width={800}
+                height={600}
+                style={{
+                  border: "1px solid #e1e8ed",
+                  borderRadius: "8px",
+                  boxSizing: "border-box",
+                  display: "block",
+                }}
+              />
+            </div>
             {tooltip && (
               <div
                 style={{
