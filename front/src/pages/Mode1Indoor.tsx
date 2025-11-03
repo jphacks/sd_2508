@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, set } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
@@ -59,6 +59,7 @@ export default function Mode1Indoor() {
   const [showLogPanel, setShowLogPanel] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const presenceStatusRef = useRef<Map<string, boolean>>(new Map());
   const [showRssiOverlay, setShowRssiOverlay] = useState(false);
   const [deviceBeaconSignals, setDeviceBeaconSignals] = useState<
     Map<string, BeaconSignal[]>
@@ -688,6 +689,27 @@ export default function Mode1Indoor() {
         yMax: position.y <= outlineHeight + margin
       }
     });
+
+    const normalizedDeviceId = device.devEUI?.toLowerCase();
+    if (normalizedDeviceId) {
+      const previous = presenceStatusRef.current.get(normalizedDeviceId);
+      if (previous !== isInside) {
+        presenceStatusRef.current.set(normalizedDeviceId, isInside);
+        const presenceRef = ref(rtdb, `devicePresence/${normalizedDeviceId}`);
+        set(presenceRef, {
+          deviceId: device.devEUI,
+          isInside,
+          updatedAt: new Date().toISOString()
+        }).catch((error) => {
+          console.error(`Presence update failed for ${device.devEUI}:`, error);
+          if (typeof previous === "boolean") {
+            presenceStatusRef.current.set(normalizedDeviceId, previous);
+          } else {
+            presenceStatusRef.current.delete(normalizedDeviceId);
+          }
+        });
+      }
+    }
 
     if (!isInside) {
       const alertId = `exit_room-${device.devEUI}`;
