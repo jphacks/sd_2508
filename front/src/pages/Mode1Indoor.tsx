@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { ref, onValue, set, update } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
@@ -60,6 +60,7 @@ export default function Mode1Indoor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const presenceStatusRef = useRef<Map<string, boolean>>(new Map());
+  const rtdbUnsubscribesRef = useRef<(() => void)[]>([]);
   const doorCalibrationAveragesRef = useRef<
     Map<
       string,
@@ -87,6 +88,21 @@ export default function Mode1Indoor() {
   useEffect(() => {
     beaconsRef.current = beacons;
   }, [beacons]);
+
+  const cleanupRtdbListeners = useCallback(() => {
+    if (rtdbUnsubscribesRef.current.length === 0) {
+      return;
+    }
+
+    rtdbUnsubscribesRef.current.forEach((unsubscribe) => {
+      try {
+        unsubscribe();
+      } catch (error) {
+        console.error("RTDB listener cleanup failed:", error);
+      }
+    });
+    rtdbUnsubscribesRef.current = [];
+  }, []);
 
   const getBeaconInfo = useCallback((mac: string) => {
     const normalized = mac.toUpperCase().replace(/:/g, "");
@@ -123,7 +139,10 @@ export default function Mode1Indoor() {
 
   useEffect(() => {
     loadData();
-  }, []);
+    return () => {
+      cleanupRtdbListeners();
+    };
+  }, [cleanupRtdbListeners]);
 
   const computeDoorCalibrationAverages = useCallback((room: RoomProfile) => {
     const result = new Map<
@@ -239,6 +258,7 @@ export default function Mode1Indoor() {
 
   const loadData = async () => {
     try {
+      cleanupRtdbListeners();
       // TODO: 実際のユーザーIDを使用
       const userId = "demo-user";
 
@@ -326,16 +346,17 @@ export default function Mode1Indoor() {
             const normalizedDeviceId = device.devEUI.toLowerCase();
             if (!normalizedDeviceId) return;
 
-            // ★ 転倒/ショック状態を最小購読: active === true ならアラートを追加、falseなら削除
-            const shockRef = ref(
-              rtdb,
-              `devices/${normalizedDeviceId}/status/shock`
-            );
-            console.log("shockRef:", shockRef.toString());
-            onValue(shockRef, (snap) => {
-              const shock = snap.val(); // boolean expected: true / false
-              const active = Boolean(shock);
+            const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
+
+            console.log(`📍 Mode1: ${device.deviceId}の監視開始`, {
+              devEUI: device.devEUI,
+              normalized: normalizedDeviceId,
+            });
+
+            const unsubscribe = onValue(trackerRef, (snapshot) => {
+              const data = snapshot.val();
               const alertId = `shock-${normalizedDeviceId}`;
+              const shock = data?.status?.shock;
 
               console.log("shock debug:", {
                 devEUI: normalizedDeviceId,
@@ -355,27 +376,14 @@ export default function Mode1Indoor() {
                   timestamp: new Date().toISOString(),
                   dismissed: false,
                 };
-                // 同じIDがなければ追加
                 setAlerts((prev) =>
                   prev.some((a) => a.id === alertId) ? prev : [...prev, alert]
                 );
-                // 音を鳴らす（任意）
                 audioRef.current?.play().catch(() => {});
               } else {
-                // false or データ無しなら消す
                 setAlerts((prev) => prev.filter((a) => a.id !== alertId));
               }
-            });
 
-            const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
-
-            console.log(`📍 Mode1: ${device.deviceId}の監視開始`, {
-              devEUI: device.devEUI,
-              normalized: normalizedDeviceId,
-            });
-
-            onValue(trackerRef, (snapshot) => {
-              const data = snapshot.val();
               if (data && data.beacons && roomData) {
                 console.log(`📡 ${device.deviceId}のRTDB更新:`, {
                   timestamp: data.beaconsUpdatedAt,
@@ -808,6 +816,7 @@ export default function Mode1Indoor() {
                 });
               }
             });
+            rtdbUnsubscribesRef.current.push(unsubscribe);
           });
         }
       }
