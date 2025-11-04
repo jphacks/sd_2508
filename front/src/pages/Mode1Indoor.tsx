@@ -61,17 +61,6 @@ export default function Mode1Indoor() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const presenceStatusRef = useRef<Map<string, boolean>>(new Map());
   const rtdbUnsubscribesRef = useRef<(() => void)[]>([]);
-  const doorCalibrationAveragesRef = useRef<
-    Map<
-      string,
-      {
-        inside: number | null;
-        outside: number | null;
-        combined: number | null;
-        minDoor?: number | null;
-      }
-    >
-  >(new Map());
   const [showRssiOverlay, setShowRssiOverlay] = useState(false);
   const [deviceBeaconSignals, setDeviceBeaconSignals] = useState<
     Map<string, BeaconSignal[]>
@@ -143,113 +132,6 @@ export default function Mode1Indoor() {
       cleanupRtdbListeners();
     };
   }, [cleanupRtdbListeners]);
-
-  const computeDoorCalibrationAverages = useCallback((room: RoomProfile) => {
-    const result = new Map<
-      string,
-      {
-        inside: number | null;
-        outside: number | null;
-        combined: number | null;
-        minDoor?: number | null;
-      }
-    >();
-
-    if (!Array.isArray(room.calibrationPoints)) {
-      return result;
-    }
-
-    const doorInside = room.calibrationPoints.find(
-      (point) => point.id === "door_inside"
-    );
-    const doorOutside = room.calibrationPoints.find(
-      (point) => point.id === "door_outside"
-    );
-
-    const accumulator = new Map<
-      string,
-      { inside: number[]; outside: number[] }
-    >();
-
-    const collectValues = (
-      point: RoomProfile["calibrationPoints"][number] | undefined,
-      key: "inside" | "outside"
-    ) => {
-      if (!point || !Array.isArray(point.measurements)) {
-        return;
-      }
-
-      point.measurements.forEach((measurement) => {
-        if (!measurement || !measurement.rssiValues) {
-          return;
-        }
-
-        Object.entries(measurement.rssiValues).forEach(([mac, value]) => {
-          if (typeof value !== "number" || Number.isNaN(value)) {
-            return;
-          }
-
-          const normalizedMac = mac.toUpperCase().replace(/:/g, "");
-          let entry = accumulator.get(normalizedMac);
-          if (!entry) {
-            entry = { inside: [], outside: [] };
-            accumulator.set(normalizedMac, entry);
-          }
-          entry[key].push(value);
-        });
-      });
-    };
-
-    collectValues(doorInside, "inside");
-    collectValues(doorOutside, "outside");
-
-    const average = (values: number[]) =>
-      values.length > 0
-        ? values.reduce((sum, v) => sum + v, 0) / values.length
-        : null;
-
-    accumulator.forEach((values, mac) => {
-      const insideAvg = average(values.inside);
-      const outsideAvg = average(values.outside);
-      const combinedValues = [...values.inside, ...values.outside];
-      const combinedAvg = average(combinedValues);
-      let minDoor: number | null = null;
-      if (
-        doorInside &&
-        doorOutside &&
-        typeof insideAvg === "number" &&
-        typeof outsideAvg === "number"
-      ) {
-        minDoor = Math.min(insideAvg, outsideAvg);
-      }
-
-      if (
-        insideAvg !== null ||
-        outsideAvg !== null ||
-        combinedAvg !== null ||
-        minDoor !== null
-      ) {
-        result.set(mac, {
-          inside: insideAvg,
-          outside: outsideAvg,
-          combined: combinedAvg,
-          minDoor,
-        });
-      }
-    });
-
-    return result;
-  }, []);
-
-  useEffect(() => {
-    if (roomProfile) {
-      doorCalibrationAveragesRef.current = computeDoorCalibrationAverages(
-        roomProfile
-      );
-    } else {
-      doorCalibrationAveragesRef.current = new Map();
-    }
-  }, [roomProfile, computeDoorCalibrationAverages]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -518,292 +400,125 @@ export default function Mode1Indoor() {
 
                 console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
 
-                const doorBeaconIds: string[] = [];
-                if (
-                  Array.isArray((roomData as any).doorBeaconIds) &&
-                  (roomData as any).doorBeaconIds.length > 0
-                ) {
-                  doorBeaconIds.push(...(roomData as any).doorBeaconIds);
-                } else if (roomData.doorBeaconId) {
-                  doorBeaconIds.push(roomData.doorBeaconId);
-                }
-
-                const doorBeaconEntries = doorBeaconIds
-                  .map((id) => {
-                    const beacon = beacons.find((b) => b.firestoreId === id);
-                    if (!beacon?.mac) {
-                      return null;
-                    }
-                    return {
-                      id,
-                      name: beacon.name || beacon.beaconId || id,
-                      mac: beacon.mac.toUpperCase().replace(/:/g, ""),
-                    };
-                  })
-                  .filter(
-                    (
-                      entry
-                    ): entry is { id: string; name: string; mac: string } =>
-                      entry !== null
-                  );
-
-                const doorBeaconMacs = new Set(
-                  doorBeaconEntries.map((entry) => entry.mac)
+                // RSSI閾値を上回っている場合、通常の位置推定を実行
+                const position = estimatePositionHybrid(
+                  rssiMap,
+                  roomData.calibrationPoints,
+                  beaconPositions.length >= 3 ? beaconPositions : undefined
                 );
 
-                let shouldForceOutside = false;
-                let exitReason: "calibration_majority" | "fallback_rssi" | null =
-                  null;
-                let calibrationCheckDebug: any = null;
-                let fallbackCheckDebug: any = null;
-
-                const calibrationAverages = doorCalibrationAveragesRef.current;
-                const calibrationComparisons = expectedBeacons
-                  .map((beaconInfo) => {
-                    const calibration = calibrationAverages.get(beaconInfo.mac);
-                    const currentRssi = rssiMap[beaconInfo.mac];
-                    return {
-                      beaconId: beaconInfo.beaconId,
-                      beaconName: beaconInfo.beaconName,
-                      mac: beaconInfo.mac,
-                      calibration,
-                      currentRssi,
-                      isDoorBeacon: doorBeaconMacs.has(beaconInfo.mac),
-                    };
-                  })
-                  .filter((entry) => {
-                    const hasCalibration =
-                      entry.calibration &&
-                      typeof entry.calibration.combined === "number";
-                    const hasCurrent = typeof entry.currentRssi === "number";
-                    return hasCalibration && hasCurrent;
+                if (position) {
+                  console.log(`📍 ${device.deviceId} 位置推定結果:`, {
+                    normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
+                    method: position.method,
+                    confidence: `${(position.confidence * 100).toFixed(1)}%`,
+                    rssiCount: Object.keys(rssiMap).length
                   });
 
-                if (calibrationComparisons.length > 0) {
-                  const doorComparisons = calibrationComparisons.filter(
-                    (entry) => entry.isDoorBeacon
-                  );
-                  const nonDoorComparisons = calibrationComparisons.filter(
-                    (entry) => !entry.isDoorBeacon
-                  );
-
-                  let doorBeaconSatisfied = false;
-                  if (doorComparisons.length > 0) {
-                    doorBeaconSatisfied = doorComparisons.every((entry) => {
-                      const minDoor = entry.calibration?.minDoor;
-                      if (typeof minDoor !== "number") {
-                        return false;
-                      }
-                      return (entry.currentRssi as number) >= minDoor;
-                    });
-                  } else {
-                    // ドアビーコンなしの場合は既存ロジックに任せる
-                    doorBeaconSatisfied = true;
-                  }
-
-                  const nonDoorBelowCount = nonDoorComparisons.filter(
-                    (entry) =>
-                      (entry.currentRssi as number) <=
-                      (entry.calibration?.combined as number)
-                  ).length;
-
-                  const nonDoorMajority =
-                    nonDoorComparisons.length > 0
-                      ? nonDoorBelowCount > nonDoorComparisons.length / 2
-                      : false;
-
-                  calibrationCheckDebug = {
-                    totalComparisons: calibrationComparisons.length,
-                    doorComparisons: doorComparisons.map((entry) => ({
-                      beaconId: entry.beaconId,
-                      beaconName: entry.beaconName,
-                      mac: entry.mac,
-                      currentRssi: entry.currentRssi,
-                      minDoor: entry.calibration?.minDoor ?? null,
-                    })),
-                    doorBeaconSatisfied,
-                    nonDoorComparisons: nonDoorComparisons.map((entry) => ({
-                      beaconId: entry.beaconId,
-                      beaconName: entry.beaconName,
-                      mac: entry.mac,
-                      currentRssi: entry.currentRssi,
-                      combinedAvg: entry.calibration?.combined ?? null,
-                    })),
-                    nonDoorBelowCount,
-                    comparisons: calibrationComparisons.map((entry) => ({
-                      beaconId: entry.beaconId,
-                      beaconName: entry.beaconName,
-                      mac: entry.mac,
-                      currentRssi: entry.currentRssi,
-                      combinedAvg: entry.calibration?.combined ?? null,
-                      outsideAvg: entry.calibration?.outside ?? null,
-                      insideAvg: entry.calibration?.inside ?? null,
-                    })),
+                  const outlineWidth = roomData.outline?.width ?? 1;
+                  const outlineHeight = roomData.outline?.height ?? 1;
+                  const actualPosition = {
+                    x: position.x * outlineWidth,
+                    y: position.y * outlineHeight
                   };
+                  console.log(`📍 ${device.deviceId} 実座標換算:`, {
+                    position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
+                    roomSize: { width: outlineWidth, height: outlineHeight }
+                  });
 
-                  console.log(
-                    `🚪 ${device.deviceId} ドアキャリブレーション比較:`,
-                    calibrationCheckDebug
-                  );
+                  const isInside = checkRoomExit(device, actualPosition, roomData, false);
 
-                  if (doorBeaconSatisfied && nonDoorMajority) {
-                    shouldForceOutside = true;
-                    exitReason = "calibration_majority";
-                  }
-                }
-
-                if (!shouldForceOutside) {
-                  const fallbackBeaconMacs = expectedBeacons
-                    .slice(0, 2)
-                    .map((beacon) => beacon.mac);
-
-                  if (fallbackBeaconMacs.length > 0) {
-                    const RSSI_THRESHOLD_PER_BEACON = -80;
-                    const fallbackRssiSum = fallbackBeaconMacs.reduce(
-                      (sum, mac) => sum + (rssiMap[mac] ?? 0),
-                      0
-                    );
-                    const fallbackThreshold =
-                      RSSI_THRESHOLD_PER_BEACON * fallbackBeaconMacs.length;
-
-                    fallbackCheckDebug = {
-                      beaconMacs: fallbackBeaconMacs,
-                      rssiSum: fallbackRssiSum,
-                      threshold: fallbackThreshold,
-                    };
-
-                    console.log(
-                      `📡 ${device.deviceId} RSSI閾値チェック（フォールバック）:`,
-                      fallbackCheckDebug
-                    );
-
-                    if (fallbackRssiSum < fallbackThreshold) {
-                      shouldForceOutside = true;
-                      exitReason = "fallback_rssi";
-                    }
-                  }
-                }
-
-                // RSSIによる退室判定が成立した場合に退室処理を実行
-                if (shouldForceOutside) {
-                  // ドアの外側位置を取得
-                  const doorOutside = roomData.calibrationPoints.find(
-                    (p) => p.id === "door_outside"
-                  );
-                  const doorInside = roomData.calibrationPoints.find(
-                    (p) => p.id === "door_inside"
-                  );
-
-                  if (doorOutside && doorInside) {
-                    // ドアの中心位置を計算（描画時と同じ）
-                    const doorCenterX = (doorInside.position.x + doorOutside.position.x) / 2;
-                    const doorCenterY = (doorInside.position.y + doorOutside.position.y) / 2;
-                    
-                    // ドアの向きベクトルを計算（内側→外側）
-                    const doorVectorX = doorOutside.position.x - doorInside.position.x;
-                    const doorVectorY = doorOutside.position.y - doorInside.position.y;
-                    const doorVectorLength = Math.sqrt(doorVectorX * doorVectorX + doorVectorY * doorVectorY);
-                    
-                    // 正規化したベクトル
-                    const normalizedVectorX = doorVectorX / doorVectorLength;
-                    const normalizedVectorY = doorVectorY / doorVectorLength;
-                    
-                    // ドアの中心からメートル単位に変換
-                    const outlineWidth = roomData.outline?.width ?? 1;
-                    const outlineHeight = roomData.outline?.height ?? 1;
-                    const doorCenterMeterX = doorCenterX * outlineWidth;
-                    const doorCenterMeterY = doorCenterY * outlineHeight;
-                    
-                    // 退室スペースの距離（ドア中心から1.5m外側）
-                    const exitSpaceDistance = 1.5;
-                    
-                    // 複数のデバイスが退室した場合の分散配置
-                    const exitDevices = Array.from(devicePositions.entries()).filter(([devEUI, pos]) => {
-                      const margin = 0.5;
-                      return !(
-                        pos.x >= -margin &&
-                        pos.x <= outlineWidth + margin &&
-                        pos.y >= -margin &&
-                        pos.y <= outlineHeight + margin
-                      );
-                    });
-                    
-                    // 現在のデバイスのインデックスを取得
-                    const deviceIndex = exitDevices.findIndex(([devEUI]) => devEUI === device.devEUI);
-                    const actualIndex = deviceIndex >= 0 ? deviceIndex : exitDevices.length;
-                    
-                    // 横方向のオフセット（-0.5m から 0.5m の範囲で分散）
-                    const lateralOffset = (actualIndex % 5 - 2) * 0.3; // 最大5人まで横に並べる
-                    const depthOffset = Math.floor(actualIndex / 5) * 0.3; // 5人を超えたら奥行き方向にも配置
-                    
-                    // 退室スペースの位置を計算（ドア中心を基準に）
-                    const outsidePosition = {
-                      x: doorCenterMeterX + normalizedVectorX * (exitSpaceDistance + depthOffset) - normalizedVectorY * lateralOffset,
-                      y: doorCenterMeterY + normalizedVectorY * (exitSpaceDistance + depthOffset) + normalizedVectorX * lateralOffset
-                    };
-
-                    console.log(`🚪 ${device.deviceId} 部屋外判定（RSSI閾値）:`, {
-                      reason: exitReason,
-                      calibrationCheck: calibrationCheckDebug,
-                      fallbackCheck: fallbackCheckDebug,
-                      doorCenterPosition: { x: doorCenterMeterX, y: doorCenterMeterY },
-                      exitPosition: outsidePosition,
-                      exitDevicesCount: exitDevices.length
-                    });
-
-                    // 退室スペースの位置に配置
-                    setDevicePositions((prev) => {
-                      const newMap = new Map(prev);
-                      newMap.set(device.devEUI, outsidePosition);
-                      return newMap;
-                    });
-
-                    // 部屋外アラートを発報
-                    checkRoomExit(device, outsidePosition, roomData, true);
-                  }
-                } else {
-                  // RSSI閾値を上回っている場合、通常の位置推定を実行
-                  const position = estimatePositionHybrid(
-                    rssiMap,
-                    roomData.calibrationPoints,
-                    beaconPositions.length >= 3 ? beaconPositions : undefined
-                  );
-
-                  if (position) {
-                    console.log(`📍 ${device.deviceId} 位置推定結果:`, {
-                      normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
-                      method: position.method,
-                      confidence: `${(position.confidence * 100).toFixed(1)}%`,
-                      rssiCount: Object.keys(rssiMap).length
-                    });
-
-                    const outlineWidth = roomData.outline?.width ?? 1;
-                    const outlineHeight = roomData.outline?.height ?? 1;
-                    const actualPosition = {
-                      x: position.x * outlineWidth,
-                      y: position.y * outlineHeight
-                    };
-                    console.log(`📍 ${device.deviceId} 実座標換算:`, {
-                      position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
-                      roomSize: { width: outlineWidth, height: outlineHeight }
-                    });
-
-                    setDevicePositions((prev) => {
-                      const newMap = new Map(prev);
+                  setDevicePositions((prev) => {
+                    const newMap = new Map(prev);
+                    if (isInside) {
                       newMap.set(device.devEUI, actualPosition);
                       return newMap;
+                    }
+
+                    const doorOutside = roomData.calibrationPoints.find(
+                      (p) => p.id === "door_outside"
+                    );
+                    const doorInside = roomData.calibrationPoints.find(
+                      (p) => p.id === "door_inside"
+                    );
+
+                    if (!doorOutside || !doorInside) {
+                      // ドア情報がない場合は推定位置のまま配置
+                      newMap.set(device.devEUI, actualPosition);
+                      return newMap;
+                    }
+
+                    const doorCenterX =
+                      (doorInside.position.x + doorOutside.position.x) / 2;
+                    const doorCenterY =
+                      (doorInside.position.y + doorOutside.position.y) / 2;
+
+                    const doorVectorX =
+                      doorOutside.position.x - doorInside.position.x;
+                    const doorVectorY =
+                      doorOutside.position.y - doorInside.position.y;
+                    const doorVectorLength = Math.sqrt(
+                      doorVectorX * doorVectorX + doorVectorY * doorVectorY
+                    );
+
+                    const normalizedVectorX =
+                      doorVectorLength !== 0 ? doorVectorX / doorVectorLength : 0;
+                    const normalizedVectorY =
+                      doorVectorLength !== 0 ? doorVectorY / doorVectorLength : 0;
+
+                    const doorCenterMeterX = doorCenterX * outlineWidth;
+                    const doorCenterMeterY = doorCenterY * outlineHeight;
+                    const exitSpaceDistance = 1.5;
+
+                    const prevWithoutCurrent = new Map(prev);
+                    prevWithoutCurrent.delete(device.devEUI);
+
+                    const margin = 0.5;
+                    const exitDevices = Array.from(prevWithoutCurrent.entries()).filter(
+                      ([, pos]) =>
+                        !(
+                          pos.x >= -margin &&
+                          pos.x <= outlineWidth + margin &&
+                          pos.y >= -margin &&
+                          pos.y <= outlineHeight + margin
+                        )
+                    );
+
+                    const deviceIndex = exitDevices.findIndex(
+                      ([devEUI]) => devEUI === device.devEUI
+                    );
+                    const actualIndex =
+                      deviceIndex >= 0 ? deviceIndex : exitDevices.length;
+
+                    const lateralOffset = (actualIndex % 5 - 2) * 0.3;
+                    const depthOffset = Math.floor(actualIndex / 5) * 0.3;
+
+                    const outsidePosition = {
+                      x:
+                        doorCenterMeterX +
+                        normalizedVectorX * (exitSpaceDistance + depthOffset) -
+                        normalizedVectorY * lateralOffset,
+                      y:
+                        doorCenterMeterY +
+                        normalizedVectorY * (exitSpaceDistance + depthOffset) +
+                        normalizedVectorX * lateralOffset,
+                    };
+
+                    console.log(`🚶 ${device.deviceId} 退室スペースへ配置:`, {
+                      outsidePosition,
+                      exitDevicesCount: exitDevices.length,
                     });
 
-                    // 部屋の外に出たかチェック（通常判定）
-                    checkRoomExit(device, actualPosition, roomData, false);
+                    newMap.set(device.devEUI, outsidePosition);
+                    return newMap;
+                  });
 
-                    // デバッグ用にメソッド情報を表示（オプション）
-                    console.log(
-                      `${device.deviceId}: ${position.method} (信頼度: ${(
-                        position.confidence * 100
-                      ).toFixed(1)}%)`
-                    );
-                  }
+                  // デバッグ用にメソッド情報を表示（オプション）
+                  console.log(
+                    `${device.deviceId}: ${position.method} (信頼度: ${(
+                      position.confidence * 100
+                    ).toFixed(1)}%)`
+                  );
                 }
 
                 setDeviceBeaconSignals((prev) => {
@@ -833,8 +548,8 @@ export default function Mode1Indoor() {
     position: { x: number; y: number },
     room: RoomProfile,
     forceOutside: boolean = false
-  ) => {
-    const margin = 0.5;
+  ): boolean => {
+    const margin = -1.0;
     const outlineWidth = room.outline?.width ?? 1;
     const outlineHeight = room.outline?.height ?? 1;
     const isInside = forceOutside ? false : (
@@ -930,6 +645,7 @@ export default function Mode1Indoor() {
       // 部屋内に戻った場合はアラートを即座に削除
       setAlerts((prev) => prev.filter((a) => a.id !== alertId));
     }
+    return isInside;
   };
 
   const dismissAlert = (alertId: string) => {
