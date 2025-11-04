@@ -549,7 +549,7 @@ export default function Mode1Indoor() {
     room: RoomProfile,
     forceOutside: boolean = false
   ): boolean => {
-    const margin = -1.0;
+    const margin = -0.5;
     const outlineWidth = room.outline?.width ?? 1;
     const outlineHeight = room.outline?.height ?? 1;
     const isInside = forceOutside ? false : (
