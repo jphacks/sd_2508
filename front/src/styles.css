@@ -54,6 +54,8 @@ body {
   align-items: center;
   gap: 8px;
   text-decoration: none;
+  height: -webkit-fit-content;
+  height: -moz-fit-content;
   height: fit-content;
   white-space: nowrap;
 }
@@ -292,6 +294,7 @@ tbody tr:hover {
   background: white;
   box-shadow: var(--shadow);
   padding: 16px 32px;
+  position: -webkit-sticky;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -360,7 +363,8 @@ tbody tr:hover {
   padding: 20px;
   border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  animation: slideDown 0.3s ease;
+  -webkit-animation: slideDown 0.3s ease;
+          animation: slideDown 0.3s ease;
 }
 
 @media (max-width: 768px) {
@@ -368,6 +372,17 @@ tbody tr:hover {
     top: 16px;
     right: 16px;
     max-width: calc(100% - 32px);
+  }
+}
+
+@-webkit-keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -382,13 +397,45 @@ tbody tr:hover {
   }
 }
 
-@keyframes pulse {
+/* @keyframes pulse {
   0%, 100% {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   }
   50% {
     box-shadow: 0 4px 30px rgba(220, 53, 69, 0.8), 0 0 20px rgba(220, 53, 69, 0.5);
   }
+} */
+
+@-webkit-keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.alert-pulse {
+  -webkit-animation: pulse 2s infinite;
+          animation: pulse 2s infinite;
+}
+
+.alert-pulse:hover {
+  -webkit-animation: none;
+          animation: none;
+}
+
+/* アラートのホバー効果 */
+.alert-panel {
+  transition: all 0.3s ease;
+}
+
+.alert-panel:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15) !important;
 }
 
 .alert-danger {
@@ -454,7 +501,13 @@ tbody tr:hover {
   border-radius: 50%;
   width: 40px;
   height: 40px;
-  animation: spin 1s linear infinite;
+  -webkit-animation: spin 1s linear infinite;
+          animation: spin 1s linear infinite;
+}
+
+@-webkit-keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 @keyframes spin {

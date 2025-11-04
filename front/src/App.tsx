@@ -18,6 +18,8 @@ import EditRoom from './pages/EditRoom';
 import Login from './pages/Login';
 import { AppMode } from './types';
 
+import TestUnifiedComponents from './pages/TestUnifiedComponents';
+
 function App() {
   const [currentMode, setCurrentMode] = useState<AppMode>('mode1');
   const [user, setUser] = useState<any>(null);
@@ -85,6 +87,8 @@ function App() {
           <Route path="/edit-room/:roomId" element={<EditRoom />} />
           <Route path="/add-calibration-point/:roomId" element={<AddCalibrationPoint />} />
           <Route path="*" element={<Navigate to="/" replace />} />
+
+          <Route path="/test-unified" element={<TestUnifiedComponents />} />
         </Routes>
       </div>
     </Router>

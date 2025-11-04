@@ -1,7 +1,15 @@
-// デバイス（トラッカー）関連の型定義
+// 統合型定義ファイル（すべての型を1つのファイルに）
+
+// === 基本型定義 ===
+export type Mode = 'indoor' | 'bus' | 'gps';
+export type AppMode = "mode1" | "mode2" | "mode3";
+export type LoadingState = 'idle' | 'loading' | 'success' | 'error';
+
+// === デバイス関連 ===
 export interface Device {
-  deviceId: string; // トラッカーにつけた名前（識別用）
-  devEUI: string; // LoRaWAN デバイスEUI（必須）
+  // 既存のフィールド
+  deviceId: string;
+  devEUI: string;
   lorawan?: {
     joinEUI?: string;
     appEUI?: string;
@@ -11,10 +19,60 @@ export interface Device {
   ownerUid: string;
   status: "active" | "inactive";
   tags?: string[];
-  userName?: string; // トラッカー所持者のユーザー名
+  userName?: string;
+  
+  // 統合画面用の追加フィールド
+  id?: string;
+  name?: string;
+  bleData?: BeaconData[];
+  position?: GPSPosition;
+  lastUpdate?: Date;
 }
 
-// ビーコン関連の型定義
+export interface BeaconData {
+  beaconId: string;
+  mac: string;
+  rssi: number;
+  timestamp: string;
+  distance?: number;
+}
+
+export interface GPSPosition {
+  lat: number;
+  lng?: number;
+  lon: number;
+  timestamp?: string;
+  accuracy?: number;
+  altitude?: number;
+  speed?: number;
+}
+
+// === アラート関連 ===
+export type AlertType = 'shock' | 'exit_room' | 'bus_alone' | 'gps_distance';
+export type AlertSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface Alert {
+  id: string;
+  type: AlertType;
+  message: string;
+  deviceId: string;
+  deviceName?: string;
+  timestamp: string;
+  dismissed: boolean;
+  severity?: AlertSeverity;
+  mode: Mode;
+  additionalData?: Record<string, any>;
+}
+
+// === モード関連 ===
+export interface ModeConfig {
+  title: string;
+  description: string;
+  color: string;
+  icon: string;
+}
+
+// === 既存の型定義（変更なし） ===
 export interface Beacon {
   beaconId: string;
   mac: string;
@@ -29,7 +87,6 @@ export interface Beacon {
   name?: string;
 }
 
-// GPS測位データ
 export interface GPSFix {
   ts: string;
   loc: { lat: number; lon: number; alt?: number };
@@ -38,7 +95,6 @@ export interface GPSFix {
   speed_mps?: number;
 }
 
-// BLEスキャンデータ
 export interface BLEScan {
   ts: string;
   scan_ms?: number;
@@ -55,11 +111,10 @@ export interface BLEScan {
   loc_hint?: { lat: number; lon: number };
 }
 
-// 位置融合データ
 export interface FusedPosition {
   ts: { _seconds: number };
   loc?: { lat: number; lon: number; floor?: number };
-  xy?: { x: number; y: number }; // 0-1の正規化座標
+  xy?: { x: number; y: number };
   cov_xy?: number[][];
   uncertainty_ellipse?: {
     semi_major: number;
@@ -75,29 +130,27 @@ export interface FusedPosition {
   };
 }
 
-// 部屋のプロファイル（機能1用）
 export interface RoomProfile {
   roomId: string;
   name: string;
-  beacons: string[]; // beaconIdの配列
+  beacons: string[];
   doorBeaconId?: string | null;
   calibrationPoints: CalibrationPoint[];
-  outline?: { width: number; height: number }; // メートル単位（未指定の場合は正規化座標）
+  outline?: { width: number; height: number };
   furniture?: FurnitureItem[];
   beaconPositions?: Array<{
     id: string;
     name: string;
-    position: { x: number; y: number }; // 0-1の正規化座標
+    position: { x: number; y: number };
   }>;
   createdAt: string;
   updatedAt: string;
 }
 
-// キャリブレーションポイント
 export interface CalibrationPoint {
   id: string;
-  position: { x: number; y: number }; // 部屋内の実座標（メートル）
-  label: string; // "左上隅", "中央", "ドア内側" など
+  position: { x: number; y: number };
+  label: string;
   measurements: Array<{
     deviceId: string;
     timestamp: string;
@@ -105,42 +158,34 @@ export interface CalibrationPoint {
   }>;
 }
 
-// 家具アイテム
 export type FurnitureType = "desk" | "tv" | "piano" | "chair";
 
 export interface FurnitureItem {
   id: string;
-  type: FurnitureType; // string から FurnitureType に変更
+  type: FurnitureType;
   position: { x: number; y: number };
   width: number;
   height: number;
 }
 
-// アプリケーションモード
-export type AppMode = "mode1" | "mode2" | "mode3";
-
-// 機能1の設定
 export interface Mode1Config {
   roomId: string;
   alertOnExit: boolean;
   calibrated: boolean;
 }
 
-// 機能2の設定
 export interface Mode2Config {
   beaconId: string;
-  alertThresholdMinutes: number; // デフォルト3分
+  alertThresholdMinutes: number;
   calibrated: boolean;
 }
 
-// 機能3の設定
 export interface Mode3Config {
-  parentTrackerIds: string[]; // 親トラッカーのdeviceId配列
-  maxDistanceMeters: number; // デフォルト30m
+  parentTrackerIds: string[];
+  maxDistanceMeters: number;
   calibrated: boolean;
 }
 
-// アプリケーション設定
 export interface AppConfig {
   currentMode: AppMode;
   mode1?: Mode1Config;
@@ -149,13 +194,95 @@ export interface AppConfig {
   userId: string;
 }
 
-// アラート情報
-export interface Alert {
-  id: string;
-  type: "exit_room" | "bus_left_behind" | "separated" | "shock";
-  message: string;
-  deviceId?: string;
-  deviceName?: string;
+export interface APIResponse<T> {
+  success: boolean;
+  data: T;
+  error?: string;
   timestamp: string;
-  dismissed: boolean;
+}
+
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+// 🔥 追加: 室内マップ関連の型定義
+export interface BeaconPosition {
+  id: string;
+  name: string;
+  x: number; // マップ上のX座標 (0-100%)
+  y: number; // マップ上のY座標 (0-100%)
+  mac: string;
+  range?: number; // 検知範囲（メートル）
+}
+
+export interface RoomLayout {
+  id: string;
+  name: string;
+  width: number; // 実際の幅（メートル）
+  height: number; // 実際の高さ（メートル）
+  beacons: BeaconPosition[];
+  obstacles?: Array<{ // 障害物（壁、家具など）
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    type: 'wall' | 'furniture' | 'door';
+    label?: string;
+  }>;
+  zones?: Array<{ // エリア定義
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    color: string;
+  }>;
+}
+
+// 🔥 追加: ビーコンデバイス型定義
+export interface BeaconDevice {
+  id: string;
+  name: string;
+  mac: string;
+  rssi?: number;
+  lastSeen?: string;
+  battery?: number;
+  isActive: boolean;
+}
+
+export interface TrackerGroup {
+  id: string;
+  name: string;
+  parentDeviceId: string;
+  childDeviceIds: string[];
+  settings: {
+    maxDistance: number;
+    alertEnabled: boolean;
+    trackingInterval: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeviceStatus {
+  deviceId: string;
+  isOnline: boolean;
+  lastSeen: string;
+  batteryLevel?: number;
+  signalStrength?: number;
+  location?: {
+    lat: number;
+    lng: number;
+    accuracy: number;
+    timestamp: string;
+  };
+  firmware?: string;
+  uptime: number;
+  dataRate?: string;
+  frequency?: number;
 }
