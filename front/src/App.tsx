@@ -2,8 +2,9 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } f
 import { useState, useEffect } from 'react';
 import './styles.css';
 import 'leaflet/dist/leaflet.css';
-import { auth } from './firebase';
+import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
 // Pages
 import Dashboard from './pages/Dashboard';
@@ -22,11 +23,32 @@ function App() {
   const [currentMode, setCurrentMode] = useState<AppMode>('mode1');
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [error, setError] = useState<string>('');
 
   useEffect(() => {
     // 認証状態の監視
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // ユーザーが許可されているか確認
+        const allowlistDoc = await getDoc(doc(db, 'allowlist', 'allowed-users'));
+        const allowedEmails = allowlistDoc.data()?.emails || [];
+        
+        if (allowedEmails.includes(user.email)) {
+          setUser(user);
+          setIsAuthorized(true);
+          setError('');
+        } else {
+          // 許可されていないユーザー
+          setError('このアプリケーションは許可されたユーザーのみご利用いただけます。');
+          await signOut(auth);
+          setUser(null);
+          setIsAuthorized(false);
+        }
+      } else {
+        setUser(null);
+        setIsAuthorized(false);
+      }
       setLoading(false);
     });
 
@@ -50,11 +72,11 @@ function App() {
   }
 
   // ログインしていない場合はログインページを表示
-  if (!user) {
+  if (!user || !isAuthorized) {
     return (
       <Router>
         <Routes>
-          <Route path="*" element={<Login />} />
+          <Route path="*" element={<Login error={error} />} />
         </Routes>
       </Router>
     );
