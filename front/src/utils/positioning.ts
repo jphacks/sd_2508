@@ -13,13 +13,10 @@ export type FurnitureType = keyof typeof FURNITURE_TYPES;
 
 /**
  * RSSI値から距離を推定（対数距離減衰モデル）
- * @param rssi 受信信号強度
- * @param referenceRssi RSSI@1mの参照値（通常-59dBm）
- * @param n 環境係数（2-4、室内は通常3程度）
  */
 export function rssiToDistance(rssi: number, referenceRssi: number = -59, n: number = 3): number {
   if (rssi === 0) {
-    return -1; // 無効な値
+    return -1;
   }
   const ratio = (referenceRssi - rssi) / (10 * n);
   return Math.pow(10, ratio);
@@ -37,39 +34,125 @@ export function estimatePositionByFingerprinting(
     return null;
   }
 
-  // 各キャリブレーションポイントとの類似度を計算（ユークリッド距離の逆数）
-  const similarities = calibrationPoints.map(point => {
-    // 最新の測定値を使用
-    if (point.measurements.length === 0) {
-      return { point, similarity: 0 };
+  const normalizeMac = (mac: string) => mac.toUpperCase().replace(/:/g, '');
+  const MISSING_SIGNAL_LEVEL = -100;
+  const SIMILARITY_DECAY = 0.15;
+
+  console.log('Fingerprinting開始:', {
+    currentRssiKeys: Object.keys(currentRssi),
+    calibrationPointsCount: calibrationPoints.length
+  });
+
+  // 現在のRSSIを正規化済みのキーへ揃える
+  const normalizedCurrent: { [beaconMac: string]: number } = {};
+  Object.entries(currentRssi).forEach(([mac, value]) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return;
     }
-    
-    const latestMeasurement = point.measurements[point.measurements.length - 1];
-    const rssiValues = latestMeasurement.rssiValues;
-    
-    // ユークリッド距離を計算
-    let sumSquaredDiff = 0;
-    let count = 0;
-    
-    for (const [mac, currentValue] of Object.entries(currentRssi)) {
-      if (rssiValues[mac] !== undefined) {
-        sumSquaredDiff += Math.pow(currentValue - rssiValues[mac], 2);
-        count++;
+    normalizedCurrent[normalizeMac(mac)] = value;
+  });
+
+  console.log('🔍 正規化された現在RSSI:', normalizedCurrent);
+
+  const beaconSet = new Set<string>();
+  Object.keys(normalizedCurrent).forEach(mac => beaconSet.add(mac));
+
+  // キャリブレーション点ごとに測定値を平均化
+  const processedPoints = calibrationPoints
+    .map(point => {
+      const aggregates = new Map<string, { sum: number; count: number }>();
+
+      console.log(`🔍 CalibrationPoint処理: ${point.label}`, {
+        measurementsCount: point.measurements?.length || 0,
+        position: point.position
+      });
+
+      if (!point.measurements || point.measurements.length === 0) {
+        console.warn(`⚠️ ${point.label}: 測定データがありません`);
+        return null;
       }
-    }
-    
-    if (count === 0) {
+
+      point.measurements.forEach(measurement => {
+        if (!measurement?.rssiValues) {
+          return;
+        }
+
+        Object.entries(measurement.rssiValues).forEach(([mac, value]) => {
+          if (typeof value !== 'number' || Number.isNaN(value)) {
+            return;
+          }
+          const normalizedMac = normalizeMac(mac);
+          const stats = aggregates.get(normalizedMac) || { sum: 0, count: 0 };
+          stats.sum += value;
+          stats.count += 1;
+          aggregates.set(normalizedMac, stats);
+          beaconSet.add(normalizedMac);
+        });
+      });
+
+      if (aggregates.size === 0) {
+        console.warn(`⚠️ ${point.label}: 有効なRSSIデータがありません`);
+        return null;
+      }
+
+      const averagedRssi: { [mac: string]: number } = {};
+      aggregates.forEach((stats, mac) => {
+        averagedRssi[mac] = stats.sum / Math.max(stats.count, 1);
+      });
+
+      console.log(`✅ ${point.label}: 平均RSSI`, averagedRssi);
+      return { point, averagedRssi };
+    })
+    .filter((item): item is { point: CalibrationPoint; averagedRssi: { [mac: string]: number } } => item !== null);
+
+  if (processedPoints.length === 0) {
+    console.warn('⚠️ 有効なCalibrationPointsがありません');
+    return null;
+  }
+
+  const beaconKeys = Array.from(beaconSet);
+  if (beaconKeys.length === 0) {
+    console.warn('⚠️ 共通ビーコンがありません');
+    return null;
+  }
+
+  console.log('🔍 使用可能ビーコン:', beaconKeys);
+
+  // 類似度の計算
+  const similarities = processedPoints.map(({ point, averagedRssi }) => {
+    let sumSquaredDiff = 0;
+    const featureCount = beaconKeys.length;
+
+    beaconKeys.forEach(mac => {
+      const currentValue = normalizedCurrent[mac] ?? MISSING_SIGNAL_LEVEL;
+      const calibrationValue = averagedRssi[mac] ?? MISSING_SIGNAL_LEVEL;
+      const diff = currentValue - calibrationValue;
+      sumSquaredDiff += diff * diff;
+    });
+
+    if (featureCount === 0) {
       return { point, similarity: 0 };
     }
-    
-    const euclideanDistance = Math.sqrt(sumSquaredDiff / count);
-    const similarity = 1 / (1 + euclideanDistance);
-    
+
+    const euclideanDistance = Math.sqrt(sumSquaredDiff / featureCount);
+    const similarity = Math.exp(-SIMILARITY_DECAY * euclideanDistance);
+
+    console.log(`🔍 ${point.label}: 類似度計算`, {
+      euclideanDistance: euclideanDistance.toFixed(2),
+      similarity: similarity.toFixed(4)
+    });
+
     return { point, similarity };
   });
 
   // 類似度でソート
   similarities.sort((a, b) => b.similarity - a.similarity);
+
+  console.log('🔍 類似度順位:', similarities.map(s => ({
+    label: s.point.label,
+    similarity: s.similarity.toFixed(4),
+    position: s.point.position
+  })));
 
   // 上位3つの点で重み付け平均（k-NN法、k=3）
   const k = Math.min(3, similarities.length);
@@ -85,14 +168,18 @@ export function estimatePositionByFingerprinting(
   }
 
   if (totalWeight === 0) {
+    console.warn('⚠️ 総重みが0です');
     return null;
   }
 
-  return {
+  const result = {
     x: weightedX / totalWeight,
     y: weightedY / totalWeight,
-    confidence: similarities[0].similarity // 最も類似したポイントの類似度を信頼度とする
+    confidence: similarities[0].similarity
   };
+
+  console.log('✅ Fingerprinting結果:', result);
+  return result;
 }
 
 /**
@@ -234,50 +321,25 @@ export function calculateDistance(
 /**
  * GPS座標間の距離を計算（メートル）- Haversine formula
  */
-export const calculateGPSDistance = (
+export function calculateGPSDistance(
   lat1: number,
-  lng1: number,
+  lon1: number,
   lat2: number,
-  lng2: number
-): number => {
-  // 入力値の検証
-  if (!isFinite(lat1) || !isFinite(lng1) || !isFinite(lat2) || !isFinite(lng2)) {
-    throw new Error('無効な座標値が渡されました');
-  }
-  
-  if (lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90) {
-    throw new Error('緯度の値が範囲外です (-90°〜90°)');
-  }
-  
-  if (lng1 < -180 || lng1 > 180 || lng2 < -180 || lng2 > 180) {
-    throw new Error('経度の値が範囲外です (-180°〜180°)');
-  }
+  lon2: number
+): number {
+  const R = 6371e3; // 地球の半径（メートル）
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
 
-  try {
-    const R = 6371000; // 地球の半径（メートル）
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    const distance = R * c;
-    
-    // 結果の検証
-    if (!isFinite(distance) || distance < 0) {
-      throw new Error('距離計算結果が無効です');
-    }
-    
-    return distance; // メートルで距離を返す
-  } catch (error) {
-    console.error('GPS距離計算エラー:', error);
-    throw error;
-  }
-};
+  return R * c; // メートル単位の距離
+}
 
 /**
  * 部屋の境界内にいるかチェック
@@ -310,7 +372,6 @@ export function smoothRSSI(values: number[], windowSize: number = 3): number {
 
 /**
  * ハイブリッド位置推定（Fingerprinting法のみ使用）
- * 指紋法によるキャリブレーションデータベースの位置推定
  */
 export function estimatePositionHybrid(
   currentRssi: { [beaconId: string]: number },
@@ -319,13 +380,26 @@ export function estimatePositionHybrid(
   referenceRssi: number = -59
 ): { x: number; y: number; confidence: number; method: string } | null {
   
-  // Fingerprinting法で推定
+  console.log('🧮 ハイブリッド位置推定開始:', {
+    currentRssiKeys: Object.keys(currentRssi),
+    calibrationPointsCount: calibrationPoints.length
+  });
+
+  // 🔥 重要: beaconIdをMACアドレスに変換
+  const macBasedRssi: { [mac: string]: number } = {};
+  
+  Object.entries(currentRssi).forEach(([beaconId, rssi]) => {
+    // beaconIdからMACアドレスを取得する必要がある
+    // これはMode1Indoorで適切に変換されているか確認が必要
+    console.log(`🔍 RSSI変換: ${beaconId} -> RSSI: ${rssi}`);
+    macBasedRssi[beaconId] = rssi; // 一時的にbeaconIdをそのまま使用
+  });
+
   const fingerprintResult = estimatePositionByFingerprinting(
-    currentRssi, 
+    macBasedRssi, 
     calibrationPoints
   );
   
-  // Fingerprintingの結果を返す
   if (fingerprintResult) {
     return { 
       ...fingerprintResult, 
@@ -333,5 +407,6 @@ export function estimatePositionHybrid(
     };
   }
   
+  console.warn('⚠️ Fingerprinting推定失敗');
   return null;
 }

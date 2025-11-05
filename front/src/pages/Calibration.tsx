@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { collection, getDocs, addDoc, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ref, onValue, off } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { Device, Beacon, CalibrationPoint, RoomProfile, FurnitureItem } from '../types';
@@ -194,6 +194,22 @@ export default function Calibration() {
   const trackerRefRef = useRef<any>(null);
   const listenerRef = useRef<any>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (trackerRefRef.current) {
+        off(trackerRefRef.current);
+        trackerRefRef.current = null;
+      }
+
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+
+      listenerRef.current = null;
+    };
+  }, []);
 
 
   const [currentRoomSize, setCurrentRoomSize] = useState({ width: 1, height: 1 });

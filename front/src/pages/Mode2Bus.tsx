@@ -1,32 +1,29 @@
-import { useState, useEffect } from 'react';
-import { collection, getDocs, onSnapshot } from 'firebase/firestore';
-import { ref, onValue } from 'firebase/database';
+// Mode2Bus.tsx の最適化版
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { ref, update, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { Device, Beacon } from '../types';
 
-// 型定義
-interface Device {
-  id: string;
-  deviceId?: string;
-  name: string;
-  userName?: string;
-  devEUI?: string;
-  mac?: string;
-  model?: string;
-  status?: string;
-  bleData?: {
-    beaconId: string;
-    rssi: number;
-    timestamp: string;
-  }[];
-}
-
-interface Beacon {
-  id: string;          // Firestoreドキュメント ID
-  beaconId?: string;   // ビーコンの識別子
-  name: string;        // 表示名
-  mac: string;         // MACアドレス
-  rssiAt1m?: number;   // 1mでのRSSI値
-  type?: string;       // ビーコンタイプ
+interface Mode2Props {
+  devices?: Device[];
+  beacons?: Beacon[];
+  selectedBeacon?: string;
+  onSelectedBeaconChange?: (beaconId: string) => void;
+  rssiThreshold?: number;
+  onRssiThresholdChange?: (threshold: number) => void;
+  alertThreshold?: number;
+  onAlertThresholdChange?: (threshold: number) => void;
+  alertEnabled?: boolean;
+  onAlertEnabledChange?: (enabled: boolean) => void;
+  alertSound?: boolean;
+  onAlertSoundChange?: (enabled: boolean) => void;
+  connectionTimeout?: number;
+  onConnectionTimeoutChange?: (timeout: number) => void;
+  showAllDevices?: boolean;
+  onShowAllDevicesChange?: (show: boolean) => void;
+  busRange?: number;
+  onBusRangeChange?: (range: number) => void;
 }
 
 interface DeviceWithConnection extends Device {
@@ -36,68 +33,388 @@ interface DeviceWithConnection extends Device {
   timeSinceLastConnection: number | null;
 }
 
-export default function Mode2Bus() {
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [beacons, setBeacons] = useState<Beacon[]>([]);
-  const [selectedBeacon, setSelectedBeacon] = useState<string>('');
-  const [alert, setAlert] = useState<string | null>(null);
-  const [alertThreshold, setAlertThreshold] = useState(3); // 分
-  const [alertEnabled, setAlertEnabled] = useState(true);
-  const [alertSound, setAlertSound] = useState(true);
-  const [isLoading, setIsLoading] = useState(true);
+export default function Mode2Bus({ 
+  devices: externalDevices, 
+  beacons: externalBeacons,
+  selectedBeacon: externalSelectedBeacon,
+  onSelectedBeaconChange,
+  rssiThreshold: externalRssiThreshold,
+  onRssiThresholdChange,
+  alertThreshold: externalAlertThreshold,
+  onAlertThresholdChange,
+  alertEnabled: externalAlertEnabled,
+  onAlertEnabledChange,
+  alertSound: externalAlertSound,
+  onAlertSoundChange,
+  connectionTimeout: externalConnectionTimeout,
+  onConnectionTimeoutChange,
+  showAllDevices: externalShowAllDevices,
+  onShowAllDevicesChange,
+  busRange: externalBusRange,
+  onBusRangeChange
+}: Mode2Props = {}) {
+  // === 基本状態管理 ===
+  const [devices, setDevices] = useState<Device[]>(externalDevices || []);
+  const [beacons, setBeacons] = useState<Beacon[]>(externalBeacons || []);
   
-  // RSSI閾値設定
-  const [rssiThreshold, setRssiThreshold] = useState(-75); // バス内判定のRSSI閾値（dBm）
+  // 内部制御用の状態
+  const [internalSelectedBeacon, setInternalSelectedBeacon] = useState<string>('');
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [internalAlertThreshold, setInternalAlertThreshold] = useState(3);
+  const [internalAlertEnabled, setInternalAlertEnabled] = useState(true);
+  const [internalAlertSound, setInternalAlertSound] = useState(true);
+  const [internalRssiThreshold, setInternalRssiThreshold] = useState(-75);
+  const [internalConnectionTimeout, setInternalConnectionTimeout] = useState(10);
+  const [internalShowAllDevices, setInternalShowAllDevices] = useState(false);
+  const [internalBusRange, setInternalBusRange] = useState(5);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // 実際のデータ読み込み
-  useEffect(() => {
-    loadInitialData();
-    
-    // リアルタイム監視の開始
-    const unsubscribeDevices = setupRealtimeMonitoring();
-    
-    return () => {
-      if (unsubscribeDevices) unsubscribeDevices();
-    };
-  }, []);
+  // 参照値
+  const rtdbUnsubscribersRef = useRef<(() => void)[]>([]);
+  const lastAlertCheckRef = useRef(0);
+  const lastUpdateRef = useRef(0); // Firebase更新用のスロットル追加
+  const alertCheckThrottleMs = 1000; // 10秒
+  const updateThrottleMs = 500;
+
+  // 外部制御か内部制御かを判定
+  const isExternalDataMode = Boolean(externalDevices && externalBeacons);
+  const isExternallyControlled = Boolean(
+    externalSelectedBeacon !== undefined ||
+    externalRssiThreshold !== undefined ||
+    onSelectedBeaconChange ||
+    onRssiThresholdChange
+  );
 
   // 距離推定関数
-  const estimateDistance = (rssi: number, rssiAt1m: number = -59) => {
-    if (rssi === 0 || rssi >= 0) return -1;
-    
-    const ratio = (rssiAt1m - rssi) / 20;
-    const distance = Math.pow(10, ratio);
-    return distance;
-  };
+  const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): number => {
+    if (rssi === 0) return -1;
+    const n = 2.0;
+    if (rssi > rssiAt1m) return 0.5;
+    const ratio = rssiAt1m / rssi;
+    if (ratio < 1.0) return 0.5;
+    return Math.pow(ratio, (1 / n));
+  }, []);
 
-  // 初期データ読み込み
-  const loadInitialData = async () => {
+  // 実際に使用する値を決定
+  const selectedBeacon = isExternallyControlled ? externalSelectedBeacon || '' : internalSelectedBeacon;
+  const rssiThreshold = isExternallyControlled ? externalRssiThreshold || -75 : internalRssiThreshold;
+  const alertThreshold = isExternallyControlled ? externalAlertThreshold || 3 : internalAlertThreshold;
+  const alertEnabled = isExternallyControlled ? externalAlertEnabled || true : internalAlertEnabled;
+  const alertSound = isExternallyControlled ? externalAlertSound || true : internalAlertSound;
+  const connectionTimeout = isExternallyControlled ? externalConnectionTimeout || 10 : internalConnectionTimeout;
+  const showAllDevices = isExternallyControlled ? externalShowAllDevices || false : internalShowAllDevices;
+  const busRange = isExternallyControlled ? externalBusRange || 5 : internalBusRange;
+
+  // === ユーティリティ関数 ===
+  const updateBusStatusInFirebase = useCallback(async (deviceId: string, devEUI: string, isInBus: boolean) => {
+    try {
+      const [deviceDocRef, statusRef] = [
+        doc(db, 'devices', deviceId),
+        ref(rtdb, `devices/${devEUI.toLowerCase()}/status`)
+      ];
+
+      await Promise.all([
+        updateDoc(deviceDocRef, {
+          'status.inBus': isInBus,
+          'status.busStatusUpdatedAt': new Date().toISOString()
+        }),
+        update(statusRef, {
+          inBus: isInBus,
+          busStatusUpdatedAt: new Date().toISOString()
+        })
+      ]);
+    } catch (error) {
+      console.error(`バス状態更新エラー (${deviceId}):`, error);
+    }
+  }, []);
+
+  const playAlertSound = useCallback(() => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      
+      const audioContext = new AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (error) {
+      console.error('警告音の再生に失敗:', error);
+    }
+  }, []);
+
+  
+  // === スロットル化された置き去り検知 ===
+  const checkForAloneDevicesThrottled = useCallback(async (overrideRssiThreshold?: number, overrideSelectedBeacon?: string) => {
+    const now = Date.now();
+    
+    if (now - lastUpdateRef.current < updateThrottleMs) {
+      console.log('⏱️ Firebase更新スロットル中 - スキップ');
+      return;
+    }
+
+    if (now - lastAlertCheckRef.current < alertCheckThrottleMs) {
+      console.log('⏱️ 警告チェックスロットル中 - スキップ');
+      return;
+    }
+    
+    lastAlertCheckRef.current = now;
+    lastUpdateRef.current = now;
+
+    const effectiveRssiThreshold = overrideRssiThreshold ?? rssiThreshold;
+    const effectiveSelectedBeacon = overrideSelectedBeacon ?? selectedBeacon;
+
+    if (!effectiveSelectedBeacon || !alertEnabled) {
+      console.log('⚠️ ビーコン未選択または警告無効のため処理をスキップ');
+      return;
+    }
+
+    try {
+      const currentTime = new Date();
+      const thresholdMs = alertThreshold * 60 * 1000;
+
+      console.log(`🔍 置き去り検知開始: RSSI閾値=${effectiveRssiThreshold}dBm, 警告時間=${alertThreshold}分`);
+
+      const devicesInBus = devices.filter(device => {
+        if (!device.bleData || !Array.isArray(device.bleData)) return false;
+        
+        const latestBleData = device.bleData.find(ble => 
+          ble && ble.beaconId === effectiveSelectedBeacon && typeof ble.rssi === 'number'
+        );
+        if (!latestBleData) return false;
+
+        try {
+          const bleTimestamp = new Date(latestBleData.timestamp);
+          if (isNaN(bleTimestamp.getTime())) return false;
+          
+          const timeSinceLastBle = currentTime.getTime() - bleTimestamp.getTime();
+          const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
+          // 🔧 引数で受け取った値を使用
+          const isWithinBusRange = latestBleData.rssi >= effectiveRssiThreshold;
+          
+          const isInBus = isRecentlyReceived && isWithinBusRange;
+          
+          if (isInBus) {
+            console.log(`✅ ${device.name}: バス内 (RSSI: ${latestBleData.rssi}dBm, 距離: ${estimateDistance(latestBleData.rssi).toFixed(1)}m)`);
+          }
+          
+          return isInBus;
+        } catch (error) {
+          console.error(`❌ ${device.name}: BLEデータ処理エラー:`, error);
+          return false;
+        }
+      });
+
+      console.log(`🚌 バス内デバイス数: ${devicesInBus.length}/${devices.length}`);
+
+      // Firebase更新（効果的な値を使用）
+      const updatePromises = devices.map(async (device) => {
+        const isInBus = devicesInBus.some(busDevice => busDevice.id === device.id);
+        if (device.devEUI) {
+          console.log(`🔄 ${device.name}: バス状態更新 → ${isInBus ? 'バス内' : 'バス外'}`);
+          await updateBusStatusInFirebase(device.id, device.devEUI, isInBus);
+        }
+      });
+
+      await Promise.all(updatePromises);
+      console.log('✅ 全デバイスのバス状態更新完了');
+
+      // 警告ロジック（既存のまま、effectiveSelectedBeaconとeffectiveRssiThresholdを使用）
+      if (devicesInBus.length === 1) {
+        const aloneDevice = devicesInBus[0];
+        const latestBleData = aloneDevice.bleData?.find(ble => ble.beaconId === effectiveSelectedBeacon);
+        
+        if (latestBleData) {
+          const aloneStartTime = new Date(latestBleData.timestamp);
+          const aloneTime = currentTime.getTime() - aloneStartTime.getTime();
+          
+          if (aloneTime >= thresholdMs) {
+            const distance = estimateDistance(latestBleData.rssi);
+            const message = `🚨 ${aloneDevice.name} がバスに置き去りにされている可能性があります！
+
+📍 推定距離: ${distance.toFixed(1)}m
+📶 信号強度: ${latestBleData.rssi}dBm
+⏰ 単独検知時間: ${Math.floor(aloneTime / 60000)}分
+🚌 判定基準: RSSI ${effectiveRssiThreshold}dBm以上をバス内と判定`;
+            
+            setAlertMessage(message);
+            
+            if (alertSound) {
+              playAlertSound();
+            }
+          }
+        }
+      } else if (devicesInBus.length === 0) {
+        const receivingDevicesCount = devices.filter(d => 
+          d.bleData?.some(ble => ble && ble.beaconId === effectiveSelectedBeacon)
+        ).length;
+        
+        const message = `📶 現在バス内にいるデバイスはありません。
+
+🔍 判定基準: RSSI ${effectiveRssiThreshold}dBm以上
+📡 受信中デバイス: ${receivingDevicesCount}台
+💡 RSSI閾値が厳しすぎる可能性があります。`;
+
+        setAlertMessage(message);
+      } else {
+        setAlertMessage(null);
+      }
+    } catch (error) {
+      console.error('❌ 置き去り検知処理エラー:', error);
+    }
+  }, [rssiThreshold, selectedBeacon, alertThreshold, alertEnabled, alertSound, devices, estimateDistance, updateBusStatusInFirebase, playAlertSound]);
+
+  // === 設定変更ハンドラー ===
+  const handleSelectedBeaconChange = useCallback((value: string) => {
+    if (onSelectedBeaconChange) {
+      onSelectedBeaconChange(value);
+    } else {
+      setInternalSelectedBeacon(value);
+    }
+  }, [onSelectedBeaconChange]);
+
+  const handleRssiThresholdChange = useCallback(async (value: number) => {
+    console.log('📶 Mode2Bus: RSSI閾値変更開始:', value, 'dBm');
+    
+    if (onRssiThresholdChange) {
+      onRssiThresholdChange(value);
+    } else {
+      setInternalRssiThreshold(value);
+    }
+    
+    // 🔧 新しい値を直接渡して即座更新
+    if (selectedBeacon && devices.length > 0) {
+      const now = Date.now();
+      if (now - lastUpdateRef.current >= 1000) { // 1秒に短縮
+        console.log('🔄 Mode2Bus: RSSI閾値変更による即座更新実行');
+        
+        setTimeout(async () => {
+          if (selectedBeacon && devices.length > 0) {
+            console.log('📶 Mode2Bus: RSSI閾値変更後の状態更新開始');
+            await checkForAloneDevicesThrottled(value, undefined);
+            console.log('✅ Mode2Bus: RSSI閾値変更による更新完了');
+          }
+        }, 200); // 遅延を短縮
+      } else {
+        console.log('⏱️ RSSI閾値変更: 前回更新から1秒未満のためスキップ');
+      }
+    }
+  }, [onRssiThresholdChange, selectedBeacon, devices.length, checkForAloneDevicesThrottled]);
+
+  const distanceToRssi = useCallback((distance: number, rssiAt1m: number = -59): number => {
+    if (distance <= 0) return rssiAt1m;
+    
+    const n = 2.0; // 環境定数
+    const rssi = rssiAt1m - (10 * n * Math.log10(distance));
+    
+    return Math.round(rssi);
+  }, []);
+
+  const handleBusRangeChange = useCallback(async (value: number) => {
+    console.log('📐 Mode2Bus: バス範囲変更開始:', value, 'm');
+    
+    if (onBusRangeChange) {
+      onBusRangeChange(value);
+    } else {
+      setInternalBusRange(value);
+    }
+    
+    // 🔧 バス範囲変更時も同様に処理
+    if (selectedBeacon && devices.length > 0) {         
+      const now = Date.now();
+      if (now - lastUpdateRef.current >= 1000) {
+        console.log('🔄 Mode2Bus: バス範囲変更による即座更新実行');
+        
+        setTimeout(async () => {
+          if (selectedBeacon && devices.length > 0) {
+            console.log('📐 Mode2Bus: バス範囲変更後の状態更新開始');
+            // バス範囲からRSSI閾値を計算して渡す
+            const calculatedRssi = distanceToRssi(value);
+            await checkForAloneDevicesThrottled(calculatedRssi, undefined);
+            console.log('✅ Mode2Bus: バス範囲変更による更新完了');
+          }
+        }, 200);
+      } else {
+        console.log('⏱️ バス範囲変更: 前回更新から1秒未満のためスキップ');
+      }
+    }
+  }, [onBusRangeChange, selectedBeacon, devices.length, checkForAloneDevicesThrottled, distanceToRssi]);
+
+  const handleAlertThresholdChange = useCallback((value: number) => {
+    if (onAlertThresholdChange) {
+      onAlertThresholdChange(value);
+    } else {
+      setInternalAlertThreshold(value);
+    }
+  }, [onAlertThresholdChange]);
+
+  const handleAlertEnabledChange = useCallback((value: boolean) => {
+    if (onAlertEnabledChange) {
+      onAlertEnabledChange(value);
+    } else {
+      setInternalAlertEnabled(value);
+    }
+  }, [onAlertEnabledChange]);
+
+  const handleAlertSoundChange = useCallback((value: boolean) => {
+    if (onAlertSoundChange) {
+      onAlertSoundChange(value);
+    } else {
+      setInternalAlertSound(value);
+    }
+  }, [onAlertSoundChange]);
+
+  const handleConnectionTimeoutChange = useCallback((value: number) => {
+    if (onConnectionTimeoutChange) {
+      onConnectionTimeoutChange(value);
+    } else {
+      setInternalConnectionTimeout(value);
+    }
+  }, [onConnectionTimeoutChange]);
+
+  const handleShowAllDevicesChange = useCallback((value: boolean) => {
+    if (onShowAllDevicesChange) {
+      onShowAllDevicesChange(value);
+    } else {
+      setInternalShowAllDevices(value);
+    }
+  }, [onShowAllDevicesChange]);
+
+  // === 独立モード用のデータ読み込み ===
+  const loadInitialData = useCallback(async () => {
     try {
       setIsLoading(true);
       
-      // ビーコン読み込み
-      const beaconsSnapshot = await getDocs(collection(db, 'beacons'));
+      const [beaconsSnapshot, devicesSnapshot] = await Promise.all([
+        getDocs(collection(db, 'beacons')),
+        getDocs(collection(db, 'devices'))
+      ]);
+
       const beaconsData = beaconsSnapshot.docs.map(doc => {
         const raw = doc.data() as any;
-        const resolvedBeaconId = typeof raw.beaconId === 'string' && raw.beaconId.length > 0 ? raw.beaconId : doc.id;
         return {
+          beaconId: doc.id,
           id: doc.id,
-          beaconId: resolvedBeaconId,
-          name: raw.name || resolvedBeaconId,
+          name: raw.name || doc.id,
           mac: raw.mac || '',
+          uuid: raw.uuid,
+          major: raw.major,
+          minor: raw.minor,
+          type: raw.type || 'ibeacon',
           rssiAt1m: (typeof raw.rssiAt1m === 'number') ? raw.rssiAt1m : -59,
-          type: raw.type || 'ibeacon'
-        };
+          place: raw.place,
+          anchor_loc: raw.anchor_loc,
+          tags: raw.tags
+        } as Beacon;
       });
-      setBeacons(beaconsData);
       
-      // 最初のビーコンを自動選択
-      if (beaconsData.length > 0 && !selectedBeacon) {
-        setSelectedBeacon(beaconsData[0].id);
-      }
-      
-      // デバイス読み込み
-      const devicesSnapshot = await getDocs(collection(db, 'devices'));
       const devicesData = devicesSnapshot.docs.map(doc => {
         const raw = doc.data() as any;
         return {
@@ -109,210 +426,113 @@ export default function Mode2Bus() {
           mac: raw.mac,
           model: raw.model,
           status: raw.status,
-          bleData: Array.isArray(raw.bleData) ? raw.bleData : []
+          bleData: Array.isArray(raw.bleData) ? raw.bleData : [],
+          statusData: null
         };
       });
+
+      setBeacons(beaconsData);
       setDevices(devicesData);
       
-      console.log('✅ 初期データ読み込み完了:', {
-        beacons: beaconsData.length,
-        devices: devicesData.length
-      });
+      if (beaconsData.length > 0 && !selectedBeacon) {
+        handleSelectedBeaconChange(beaconsData[0].id);
+      }
       
     } catch (error) {
-      console.error('❌ 初期データ読み込みエラー:', error);
+      console.error('初期データ読み込みエラー:', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedBeacon, handleSelectedBeaconChange]);
 
-  // リアルタイム監視の設定
-  const setupRealtimeMonitoring = () => {
-    if (!selectedBeacon) {
-      console.log('⚠️ ビーコンが選択されていないため、監視を開始できません');
+  // === リアルタイム監視 ===
+  const setupRealtimeMonitoring = useCallback(() => {
+    if (!selectedBeacon || isExternalDataMode) {
+      console.log('⚠️ 外部データモードまたはビーコン未選択のため、RTDB監視をスキップ');
       return;
     }
 
+    rtdbUnsubscribersRef.current.forEach(unsubscribe => unsubscribe());
+    rtdbUnsubscribersRef.current = [];
+
     console.log(`🔄 ビーコン ${selectedBeacon} のリアルタイム監視を開始`);
     
-    try {
-      // Mode1と同じようにRealtimeDatabaseから取得
-      const unsubscribers = devices.map(device => {
-        const normalizedDeviceId = device.devEUI?.toLowerCase();
-        if (!normalizedDeviceId) {
-          console.warn(`⚠️ ${device.name}: devEUIが設定されていません`);
-          return null;
-        }
+    const unsubscribers = devices.map(device => {
+      const normalizedDeviceId = device.devEUI?.toLowerCase();
+      if (!normalizedDeviceId) {
+        console.warn(`⚠️ ${device.name}: devEUIが設定されていません`);
+        return null;
+      }
 
-        console.log(`📡 ${device.name}(${normalizedDeviceId})の監視開始`);
-
-        const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
-        return onValue(trackerRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data && data.beacons) {
-            console.log(`📊 ${device.name}のRTDB更新:`, {
-              timestamp: data.beaconsUpdatedAt,
-              beaconsCount: data.beacons.length,
-              selectedBeacon
+      // 🔧 beaconsデータのみを監視し、statusデータは除外
+      const beaconsRef = ref(rtdb, `devices/${normalizedDeviceId}/beacons`);
+      return onValue(beaconsRef, (snapshot) => {
+        const beacons = snapshot.val();
+        if (beacons && Array.isArray(beacons)) {
+          const bleData = beacons
+            .filter((beacon: any) => beacon.mac && beacon.rssi && beacon.rssi !== -1)
+            .map((beacon: any) => {
+              const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
+              const selectedBeaconData = beacons.find(b => 
+                b.mac && b.mac.toUpperCase().replace(/:/g, "") === normalizedMac
+              );
+              
+              return {
+                beaconId: selectedBeaconData?.id || selectedBeacon,
+                rssi: beacon.rssi,
+                timestamp: new Date().toISOString(), // 現在時刻を使用
+                mac: normalizedMac
+              };
             });
 
-            // Mode1と同じ形式でビーコンデータを処理
-            const bleData = data.beacons
-              .filter((beacon: any) => beacon.mac && beacon.rssi && beacon.rssi !== -1)
-              .map((beacon: any) => {
-                // MACアドレスを正規化
-                const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
+          // 🔧 前回のBLEデータと比較して、実際に変化があった場合のみ更新
+          setDevices(prevDevices => {
+            const updatedDevices = prevDevices.map(d => {
+              if (d.id === device.id) {
+                const prevBleData = d.bleData || [];
+                const hasRealChange = bleData.some(newBle => {
+                  const prevBle = prevBleData.find(pb => pb.beaconId === newBle.beaconId);
+                  return !prevBle || Math.abs(prevBle.rssi - newBle.rssi) >= 3; // 3dBm以上の変化のみ
+                });
                 
-                // 選択されたビーコンかチェック
-                const selectedBeaconData = beacons.find(b => 
-                  b.mac && b.mac.toUpperCase().replace(/:/g, "") === normalizedMac
-                );
-                
-                return {
-                  beaconId: selectedBeaconData?.id || selectedBeacon,
-                  rssi: beacon.rssi,
-                  timestamp: data.beaconsUpdatedAt || new Date().toISOString(),
-                  mac: normalizedMac
-                };
-              });
-            
-            // デバイス状態を更新
-            updateDeviceBleData(device.id, bleData);
-          } else {
-            console.log(`📭 ${device.name}: ビーコンデータなし`);
-            // データがない場合は空配列に設定
-            updateDeviceBleData(device.id, []);
-          }
-        }, (error) => {
-          console.error(`❌ ${device.name}の監視エラー:`, error);
-        });
-      }).filter(Boolean);
-
-      console.log(`✅ ${unsubscribers.length}台のデバイス監視を開始`);
-
-      return () => {
-        console.log('🔄 リアルタイム監視を停止');
-        unsubscribers.forEach(unsub => unsub && unsub());
-      };
-    } catch (error) {
-      console.error('❌ リアルタイム監視の設定に失敗:', error);
-      return undefined;
-    }
-  };
-
-  // デバイスのBLEデータを更新する関数
-  const updateDeviceBleData = (deviceId: string, bleData: any[]) => {
-    setDevices(prevDevices => 
-      prevDevices.map(device => 
-        device.id === deviceId 
-          ? { ...device, bleData }
-          : device
-      )
-    );
-  };
-
-  // 置き去り検知ロジック
-  const checkForAloneDevices = (currentDevices: Device[]) => {
-    if (!selectedBeacon) return;
-
-    try {
-      const now = new Date();
-      const thresholdMs = alertThreshold * 60 * 1000;
-
-      // 選択されたビーコンを受信し、RSSI閾値を満たすデバイスを特定
-      const devicesInBus = currentDevices.filter(device => {
-        if (!device.bleData || !Array.isArray(device.bleData)) return false;
-        
-        const latestBleData = device.bleData.find(ble => 
-          ble && 
-          ble.beaconId === selectedBeacon && 
-          typeof ble.rssi === 'number' && 
-          ble.timestamp
-        );
-        
-        if (!latestBleData) return false;
-
-        try {
-          const bleTimestamp = new Date(latestBleData.timestamp);
-          if (isNaN(bleTimestamp.getTime())) return false;
-          
-          const timeSinceLastBle = now.getTime() - bleTimestamp.getTime();
-          
-          // 5分以内の受信 かつ RSSI閾値以上
-          const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
-          const isWithinBusRange = latestBleData.rssi >= rssiThreshold;
-          
-          return isRecentlyReceived && isWithinBusRange;
-        } catch (error) {
-          console.error(`❌ デバイス ${device.name} の BLE データ処理エラー:`, error);
-          return false;
-        }
-      });
-
-      console.log(`🚌 バス内デバイス数: ${devicesInBus.length} (RSSI閾値: ${rssiThreshold}dBm以上)`);
-
-      // 1台のみの状態が閾値時間続いているかチェック
-      if (devicesInBus.length === 1) {
-        const aloneDevice = devicesInBus[0];
-        const latestBleData = aloneDevice.bleData?.find(ble => ble.beaconId === selectedBeacon);
-        
-        if (latestBleData) {
-          try {
-            const aloneStartTime = new Date(latestBleData.timestamp);
-            const aloneTime = now.getTime() - aloneStartTime.getTime();
-            const distance = estimateDistance(latestBleData.rssi);
-            
-            if (aloneTime >= thresholdMs) {
-              const alertMessage = `🚨 ${aloneDevice.name} がバスに置き去りにされている可能性があります！
-
-📍 推定距離: ${distance.toFixed(1)}m
-📶 信号強度: ${latestBleData.rssi}dBm
-⏰ 単独検知時間: ${Math.floor(aloneTime / 60000)}分
-🚌 判定基準: RSSI ${rssiThreshold}dBm以上をバス内と判定`;
-              
-              setAlert(alertMessage);
-              
-              // 警告音の再生
-              if (alertSound) {
-                playAlertSound();
+                if (hasRealChange) {
+                  console.log(`📶 ${device.name}: BLE実データ変更検出 (RSSI変化3dBm以上)`);
+                  return { ...d, bleData };
+                }
+                return d;
               }
-              
-              console.log('🚨 置き去り警告発生:', alertMessage);
-            }
-          } catch (error) {
-            console.error('❌ 警告処理エラー:', error);
-          }
+              return d;
+            });
+            
+            return updatedDevices;
+          });
+
+          // 🔧 BLE受信時の Firebase更新を削除（設定変更時のみに制限）
+          // setTimeout(() => {
+          //   console.log(`🔄 ${device.name}: BLE受信による状態更新実行`);
+          //   checkForAloneDevicesThrottled();
+          // }, 200);
         }
-      } else if (devicesInBus.length === 0) {
-        const receivingDevicesCount = currentDevices.filter(d => 
-          d.bleData?.some(ble => ble && ble.beaconId === selectedBeacon)
-        ).length;
-        
-        setAlert(`📶 現在バス内にいるデバイスはありません。
+      }, (error) => {
+        console.error(`❌ ${device.name}の監視エラー:`, error);
+      });
+    }).filter(Boolean);
 
-🔍 判定基準: RSSI ${rssiThreshold}dBm以上
-📡 受信中デバイス: ${receivingDevicesCount}台
-💡 RSSI閾値が厳しすぎる可能性があります。`);
-      } else {
-        // 複数台がバス内にいる場合は警告をクリア
-        setAlert(null);
-      }
-    } catch (error) {
-      console.error('❌ 置き去り検知処理エラー:', error);
-    }
-  };
+    rtdbUnsubscribersRef.current = unsubscribers as (() => void)[];
+    
+    return () => {
+      rtdbUnsubscribersRef.current.forEach(unsubscribe => unsubscribe());
+      rtdbUnsubscribersRef.current = [];
+    };
+  }, [selectedBeacon, devices, beacons, isExternalDataMode]);
 
-  // 通信状況監視用の状態を追加
-  const [connectionTimeout, setConnectionTimeout] = useState(10); // 分
-  const [showAllDevices, setShowAllDevices] = useState(false); // 全デバイス表示切り替え
-
-  // 通信状況を取得する関数
-  const getDeviceConnectionStatus = () => {
+  // === メモ化された計算 ===
+  const deviceStatusList = useMemo(() => {
     const now = new Date();
     const timeoutMs = connectionTimeout * 60 * 1000;
 
     return devices.map(device => {
-      let connectionStatus = 'offline'; // offline, online, weak
+      let connectionStatus: DeviceWithConnection['connectionStatus'] = 'offline';
       let latestBleData = null;
       let lastConnectionTime = null;
       let rssiValue = null;
@@ -331,20 +551,14 @@ export default function Mode2Bus() {
               rssiValue = latestBleData.rssi;
 
               if (timeSinceLastBle < timeoutMs) {
-                // RSSI値による接続品質判定
-                if (rssiValue >= -60) {
-                  connectionStatus = 'excellent';
-                } else if (rssiValue >= -70) {
-                  connectionStatus = 'good';
-                } else if (rssiValue >= -80) {
-                  connectionStatus = 'weak';
-                } else {
-                  connectionStatus = 'poor';
-                }
+                if (rssiValue >= -60) connectionStatus = 'excellent';
+                else if (rssiValue >= -70) connectionStatus = 'good';
+                else if (rssiValue >= -80) connectionStatus = 'weak';
+                else connectionStatus = 'poor';
               }
             }
           } catch (error) {
-            console.error(`❌ デバイス ${device.name} の接続状況確認エラー:`, error);
+            // エラーハンドリング
           }
         }
       }
@@ -355,74 +569,11 @@ export default function Mode2Bus() {
         lastConnectionTime,
         rssiValue,
         timeSinceLastConnection: lastConnectionTime ? now.getTime() - lastConnectionTime.getTime() : null
-      };
+      } as DeviceWithConnection;
     });
-  };
+  }, [devices, selectedBeacon, connectionTimeout]);
 
-  // 接続状況による色とアイコンを取得
-  const getConnectionDisplay = (status: string, rssi?: number) => {
-    switch (status) {
-      case 'excellent':
-        return { color: '#4CAF50', icon: '📶', text: '優秀', bgColor: '#E8F5E8' };
-      case 'good':
-        return { color: '#8BC34A', icon: '📶', text: '良好', bgColor: '#F1F8E9' };
-      case 'weak':
-        return { color: '#FF9800', icon: '📶', text: '弱い', bgColor: '#FFF8E1' };
-      case 'poor':
-        return { color: '#F44336', icon: '📵', text: '貧弱', bgColor: '#FFEBEE' };
-      case 'offline':
-      default:
-        return { color: '#9E9E9E', icon: '📵', text: 'オフライン', bgColor: '#F5F5F5' };
-    }
-  };
-
-  // 信号強度バーの幅を計算
-  const getRssiBarWidth = (rssi: number) => {
-    if (rssi >= -30) return 100;
-    if (rssi <= -90) return 0;
-    return ((rssi + 90) / 60) * 100;
-  };
-
-  // 警告音の再生
-  const playAlertSound = () => {
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) {
-        console.warn('⚠️ このブラウザは Web Audio API をサポートしていません');
-        return;
-      }
-      
-      const audioContext = new AudioContext();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      
-      oscillator.start();
-      oscillator.stop(audioContext.currentTime + 0.5);
-      
-      console.log('🔊 警告音を再生しました');
-    } catch (error) {
-      console.error('❌ 警告音の再生に失敗:', error);
-    }
-  };
-
-  // 選択されたビーコンの変更時にリアルタイム監視を再設定
-  useEffect(() => {
-    if (selectedBeacon && devices.length > 0) {
-      const unsubscribe = setupRealtimeMonitoring();
-      return () => {
-        if (unsubscribe) unsubscribe();
-      };
-    }
-  }, [selectedBeacon, devices, beacons]);
-
-  // 現在アクティブなデバイス（ビーコンを受信中）を取得
-  const getActiveDevices = () => {
+  const activeDevices = useMemo(() => {
     if (!selectedBeacon) return [];
 
     const now = new Date();
@@ -440,714 +591,608 @@ export default function Mode2Bus() {
         if (isNaN(bleTimestamp.getTime())) return false;
         
         const timeSinceLastBle = now.getTime() - bleTimestamp.getTime();
-        
-        // 条件1: 5分以内の受信
         const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
-        
-        // 条件2: RSSI値がバス内の距離範囲内
         const isWithinBusRange = latestBleData.rssi >= rssiThreshold;
         
         return isRecentlyReceived && isWithinBusRange;
       } catch (error) {
-        console.error(`❌ デバイス ${device.name} の処理エラー:`, error);
         return false;
       }
     });
-  };
+  }, [devices, selectedBeacon, rssiThreshold]);
 
+  // 🔧 表示するデバイスリストを showAllDevices の設定に基づいて決定
+  const displayDevices = useMemo(() => {
+    if (showAllDevices) {
+      return deviceStatusList;
+    } else {
+      const now = new Date();
+      const timeoutMs = connectionTimeout * 60 * 1000;
+
+      return activeDevices.map(device => {
+        let connectionStatus: DeviceWithConnection['connectionStatus'] = 'offline';
+        let latestBleData = null;
+        let lastConnectionTime = null;
+        let rssiValue = null;
+
+        if (selectedBeacon && device.bleData && Array.isArray(device.bleData)) {
+          latestBleData = device.bleData.find(ble => 
+            ble && ble.beaconId === selectedBeacon && typeof ble.rssi === 'number'
+          );
+
+          if (latestBleData) {
+            try {
+              const bleTimestamp = new Date(latestBleData.timestamp);
+              if (!isNaN(bleTimestamp.getTime())) {
+                lastConnectionTime = bleTimestamp;
+                const timeSinceLastBle = now.getTime() - bleTimestamp.getTime();
+                rssiValue = latestBleData.rssi;
+
+                if (timeSinceLastBle < timeoutMs) {
+                  if (rssiValue >= -60) connectionStatus = 'excellent';
+                  else if (rssiValue >= -70) connectionStatus = 'good';
+                  else if (rssiValue >= -80) connectionStatus = 'weak';
+                  else connectionStatus = 'poor';
+                }
+              }
+            } catch (error) {
+              // エラー処理
+            }
+          }
+        }
+
+        return {
+          ...device,
+          connectionStatus,
+          lastConnectionTime,
+          rssiValue,
+          timeSinceLastConnection: lastConnectionTime ? now.getTime() - lastConnectionTime.getTime() : null
+        } as DeviceWithConnection;
+      });
+    }
+  }, [showAllDevices, deviceStatusList, activeDevices, selectedBeacon, connectionTimeout]);
+
+  // === エフェクト ===
+  useEffect(() => {
+    if (isExternalDataMode && externalDevices && externalBeacons) {
+      setDevices(externalDevices);
+      setBeacons(externalBeacons);
+      setIsLoading(false);
+      
+      if (externalBeacons.length > 0 && !selectedBeacon) {
+        handleSelectedBeaconChange(externalBeacons[0].id);
+      }
+      
+      console.log('🔄 外部データモードで初期化:', {
+        devicesCount: externalDevices.length,
+        beaconsCount: externalBeacons.length
+      });
+    } else {
+      console.log('🔄 独立モードで初期化');
+      loadInitialData();
+    }
+  }, [externalDevices, externalBeacons, isExternalDataMode, loadInitialData, selectedBeacon, handleSelectedBeaconChange]);
+
+  useEffect(() => {
+    if (isExternalDataMode && externalDevices && Array.isArray(externalDevices)) {
+      const timer = setTimeout(() => {
+        setDevices(externalDevices);
+        console.log('📱 外部デバイスデータ更新:', externalDevices.length);
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [externalDevices, isExternalDataMode]);
+
+  useEffect(() => {
+    if (isExternalDataMode && externalBeacons && Array.isArray(externalBeacons)) {
+      setBeacons(externalBeacons);
+      console.log('📡 外部ビーコンデータ更新:', externalBeacons.length);
+    }
+  }, [externalBeacons, isExternalDataMode]);
+
+  useEffect(() => {
+    if (selectedBeacon && devices.length > 0 && beacons.length > 0 && !isExternalDataMode) {
+      const cleanup = setupRealtimeMonitoring();
+      return cleanup;
+    }
+  }, [selectedBeacon, devices.length, beacons.length, isExternalDataMode, setupRealtimeMonitoring]);
+
+  useEffect(() => {
+    return () => {
+      rtdbUnsubscribersRef.current.forEach(unsubscribe => unsubscribe());
+    };
+  }, []);
+
+  // === レンダリング ===
   if (isLoading) {
     return (
-      <div className="container">
-        <div className="card">
-          <h2>🔄 データを読み込み中...</h2>
-          <p>ビーコンとデバイスの情報を取得しています。</p>
-        </div>
+      <div style={{ padding: '40px', textAlign: 'center' }}>
+        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔄</div>
+        <h2>読み込み中...</h2>
+        <p>データを取得しています。しばらくお待ちください。</p>
       </div>
     );
   }
 
-  const deviceStatusList = getDeviceConnectionStatus();
-  const activeDevices = getActiveDevices();
-
   return (
-  <div className="container">
-    <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-      🚌 バス置き去り検知
-    </h1>
-
-    {/* 警告表示 */}
-    {alert && (
-      <div className={`alert ${activeDevices.length === 1 ? 'alert-danger' : 'alert-warning'}`} style={{ marginBottom: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ whiteSpace: 'pre-line', flex: 1 }}>
-            <strong style={{ fontSize: '18px' }}>
-              {activeDevices.length === 1 ? '🚨 緊急警告' : '📶 通信状況'}
-            </strong>
-            <p style={{ marginTop: '8px', fontSize: '16px', lineHeight: '1.5' }}>{alert}</p>
-          </div>
-          <button
-            onClick={() => setAlert(null)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'white',
-              fontSize: '24px',
-              cursor: 'pointer',
-              minWidth: '30px',
-              padding: '4px'
-            }}
-          >
-            ×
-          </button>
-        </div>
-      </div>
-    )}
-
-    <div className="grid grid-2">
-      {/* バス内デバイス一覧 */}
-      <div className="card">
-        <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          🚌 バス内のデバイス ({activeDevices.length}台)
-        </h3>
-        
-        <div style={{ 
-          marginBottom: '16px', 
-          padding: '12px', 
-          backgroundColor: '#F0F8FF', 
+    <div style={{ 
+      padding: '24px', 
+      backgroundColor: '#f8f9fa',
+      minHeight: '100vh'
+    }}>
+      {/* 警告メッセージ */}
+      {alertMessage && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          backgroundColor: '#fff3cd',
+          border: '1px solid #ffeaa7',
           borderRadius: '8px',
-          fontSize: '14px',
-          color: '#1976D2',
-          border: '1px solid #E3F2FD'
-        }}>
-          💡 <strong>判定基準:</strong> RSSI {rssiThreshold}dBm以上 かつ 5分以内の受信
-        </div>
-        
-        {activeDevices.length > 0 ? (
-          <div style={{ display: 'grid', gap: '12px' }}>
-            {activeDevices.map(device => {
-              const latestBleData = device.bleData?.find(ble => ble.beaconId === selectedBeacon);
-              const distance = latestBleData ? estimateDistance(latestBleData.rssi) : -1;
-              const rssiPercentage = latestBleData ? Math.max(0, Math.min(100, ((latestBleData.rssi + 90) / 60) * 100)) : 0;
-              
-              return (
-                <div
-                  key={device.id}
-                  style={{
-                    padding: '16px',
-                    backgroundColor: '#F8F9FA',
-                    borderRadius: '8px',
-                    border: '2px solid #E8F5E8'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                    <div style={{ flex: 1 }}>
-                      <h4 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 'bold' }}>
-                        {device.name}
-                      </h4>
-                      {device.deviceId && device.deviceId !== device.name && (
-                        <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666', fontFamily: 'monospace' }}>
-                          ID: {device.deviceId}
-                        </p>
-                      )}
-                    </div>
-                    <div style={{
-                      width: '16px',
-                      height: '16px',
-                      borderRadius: '50%',
-                      backgroundColor: '#4CAF50'
-                    }} />
-                  </div>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '14px' }}>
-                    <div>
-                      <strong>📶 信号強度</strong>
-                      <div style={{ marginTop: '4px' }}>
-                        <div style={{
-                          fontSize: '16px',
-                          fontWeight: 'bold',
-                          color: latestBleData && latestBleData.rssi >= -60 ? '#4CAF50' : 
-                                 latestBleData && latestBleData.rssi >= -70 ? '#FF9800' : '#F44336'
-                        }}>
-                          {latestBleData?.rssi || 'N/A'} dBm
-                        </div>
-                        <div style={{
-                          width: '100%',
-                          height: '4px',
-                          backgroundColor: '#E0E0E0',
-                          borderRadius: '2px',
-                          marginTop: '4px'
-                        }}>
-                          <div style={{
-                            width: `${rssiPercentage}%`,
-                            height: '100%',
-                            backgroundColor: latestBleData && latestBleData.rssi >= -60 ? '#4CAF50' : 
-                                           latestBleData && latestBleData.rssi >= -70 ? '#FF9800' : '#F44336',
-                            borderRadius: '2px'
-                          }} />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <strong>📏 推定距離</strong>
-                      <div style={{ marginTop: '4px' }}>
-                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>
-                          {distance > 0 ? `${distance.toFixed(1)}m` : 'N/A'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginTop: '12px', fontSize: '12px', color: '#666' }}>
-                    🕐 最終受信: {latestBleData ? new Date(latestBleData.timestamp).toLocaleString('ja-JP') : 'N/A'}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📶</div>
-            <h4 style={{ margin: '0 0 8px 0' }}>バス内のデバイスはありません</h4>
-            <p style={{ margin: 0, fontSize: '14px' }}>
-              RSSI {rssiThreshold}dBm以上のデバイスが検出されていません
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* 設定パネル */}
-      <div className="card">
-        <h3 style={{ marginBottom: '16px' }}>⚙️ 設定</h3>
-        
-        {/* ビーコン選択 */}
-        <div className="form-group">
-          <label className="form-label">監視対象ビーコン</label>
-          <select
-            className="form-select"
-            value={selectedBeacon}
-            onChange={(e) => setSelectedBeacon(e.target.value)}
-          >
-            <option value="">選択してください</option>
-            {beacons.map(beacon => (
-              <option key={beacon.id} value={beacon.id}>
-                {beacon.name} {beacon.mac && `(${beacon.mac})`}
-              </option>
-            ))}
-          </select>
-          {selectedBeacon && (
-            <div style={{ 
-              marginTop: '8px', 
-              padding: '12px', 
-              backgroundColor: '#E8F5E8', 
-              borderRadius: '6px',
-              fontSize: '14px',
-              border: '1px solid #C8E6C9'
-            }}>
-              <p style={{ margin: '0 0 4px 0', fontWeight: 'bold', color: '#2E7D32' }}>
-                ✅ 選択中: {beacons.find(b => b.id === selectedBeacon)?.name}
-              </p>
-              <p style={{ margin: 0, color: '#666' }}>
-                MAC: {beacons.find(b => b.id === selectedBeacon)?.mac || '未設定'}
-              </p>
-            </div>
-          )}
-        </div>
-        
-        {/* RSSI閾値設定 */}
-        <div className="form-group">
-          <label className="form-label">バス内判定RSSI閾値（dBm）</label>
-          <input
-            type="number"
-            className="form-input"
-            value={rssiThreshold}
-            onChange={(e) => setRssiThreshold(Number(e.target.value))}
-            min={-90}
-            max={-30}
-            step={5}
-          />
-          <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            この値以上のRSSIでバス内と判定
-          </div>
-          <div style={{ fontSize: '11px', color: '#888', marginTop: '6px', lineHeight: '1.4' }}>
-            💡 <strong>目安値:</strong><br />
-            • -50dBm: 約1m（非常に近い）<br />
-            • -60dBm: 約2-3m（近い）<br />
-            • -70dBm: 約3-5m（標準）<br />
-            • -80dBm: 約5-10m（遠い）
-          </div>
-        </div>
-        
-        {/* 警告時間設定 */}
-        <div className="form-group">
-          <label className="form-label">警告までの時間（分）</label>
-          <input
-            type="number"
-            className="form-input"
-            value={alertThreshold}
-            onChange={(e) => setAlertThreshold(Number(e.target.value))}
-            min={1}
-            max={10}
-          />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            1台のみの検知が続く時間の閾値
-          </p>
-        </div>
-        
-        {/* 警告有効/無効 */}
-        <div className="form-group">
-          <label className="form-label">置き去り警告</label>
-          <button
-            onClick={() => setAlertEnabled(!alertEnabled)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 16px',
-              borderRadius: '25px',
-              border: 'none',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              backgroundColor: alertEnabled ? '#4CAF50' : '#E0E0E0',
-              color: alertEnabled ? 'white' : '#666',
-              transition: 'all 0.3s ease'
-            }}
-          >
-            <div
-              style={{
-                width: '20px',
-                height: '20px',
-                borderRadius: '50%',
-                backgroundColor: 'white',
-                transition: 'transform 0.3s ease',
-                transform: alertEnabled ? 'translateX(0)' : 'translateX(-4px)'
-              }}
-            />
-            {alertEnabled ? '有効' : '無効'}
-          </button>
-        </div>
-        
-        {/* 警告音設定 */}
-        <div className="form-group">
-          <label className="form-label">警告音</label>
-          <button
-            onClick={() => setAlertSound(!alertSound)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 16px',
-              borderRadius: '25px',
-              border: 'none',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              backgroundColor: alertSound ? '#4CAF50' : '#E0E0E0',
-              color: alertSound ? 'white' : '#666',
-              transition: 'all 0.3s ease'
-            }}
-          >
-            <div
-              style={{
-                width: '20px',
-                height: '20px',
-                borderRadius: '50%',
-                backgroundColor: 'white',
-                transition: 'transform 0.3s ease',
-                transform: alertSound ? 'translateX(0)' : 'translateX(-4px)'
-              }}
-            />
-            {alertSound ? '有効' : '無効'}
-          </button>
-        </div>
-
-        {/* 通信タイムアウト設定 */}
-        <div className="form-group">
-          <label className="form-label">通信タイムアウト（分）</label>
-          <input
-            type="number"
-            className="form-input"
-            value={connectionTimeout}
-            onChange={(e) => setConnectionTimeout(Number(e.target.value))}
-            min={1}
-            max={60}
-          />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            この時間内に通信がない場合はオフラインと判定
-          </p>
-        </div>
-
-        {/* 全デバイス表示切り替え */}
-        <div className="form-group">
-          <label className="form-label">全デバイス表示</label>
-          <button
-            onClick={() => setShowAllDevices(!showAllDevices)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 16px',
-              borderRadius: '25px',
-              border: 'none',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              backgroundColor: showAllDevices ? '#4CAF50' : '#E0E0E0',
-              color: showAllDevices ? 'white' : '#666',
-              transition: 'all 0.3s ease'
-            }}
-          >
-            <div
-              style={{
-                width: '20px',
-                height: '20px',
-                borderRadius: '50%',
-                backgroundColor: 'white',
-                transition: 'transform 0.3s ease',
-                transform: showAllDevices ? 'translateX(0)' : 'translateX(-4px)'
-              }}
-            />
-            {showAllDevices ? '表示中' : '非表示'}
-          </button>
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            バス外・オフラインデバイスも表示
-          </p>
-        </div>
-
-        {/* テスト警告音ボタン */}
-        <div className="form-group">
-          <button
-            onClick={playAlertSound}
-            className="btn btn-outline"
-            style={{ width: '100%' }}
-          >
-            🔊 警告音をテスト
-          </button>
-        </div>
-      </div>
-    </div>
-
-      {/* 全デバイス通信状況一覧を追加 */}
-      <div className="card" style={{ marginTop: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            📡 全デバイス通信状況 ({deviceStatusList.length}台)
-          </h3>
-          <div style={{ fontSize: '12px', color: '#666', textAlign: 'right' }}>
-            監視中ビーコン: {selectedBeacon ? beacons.find(b => b.id === selectedBeacon)?.name || '不明' : '未選択'}
-          </div>
-        </div>
-
-        {/* 通信状況サマリー */}
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', 
-          gap: '12px', 
-          marginBottom: '20px',
           padding: '16px',
-          backgroundColor: '#F8F9FA',
-          borderRadius: '8px'
+          maxWidth: '400px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000
         }}>
-          {['excellent', 'good', 'weak', 'poor', 'offline'].map(status => {
-            const count = deviceStatusList.filter(d => d.connectionStatus === status).length;
-            const display = getConnectionDisplay(status);
-            return (
-              <div key={status} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '24px', marginBottom: '4px' }}>{display.icon}</div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: display.color }}>{count}</div>
-                <div style={{ fontSize: '12px', color: '#666' }}>{display.text}</div>
-              </div>
-            );
-          })}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            marginBottom: '8px'
+          }}>
+            <strong style={{ color: '#856404' }}>⚠️ 警告</strong>
+            <button
+              onClick={() => setAlertMessage(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '18px',
+                cursor: 'pointer',
+                color: '#856404'
+              }}
+            >
+              ×
+            </button>
+          </div>
+          <div style={{ 
+            color: '#856404', 
+            fontSize: '14px',
+            whiteSpace: 'pre-line',
+            lineHeight: '1.4'
+          }}>
+            {alertMessage}
+          </div>
         </div>
+      )}
 
-        {/* デバイス一覧 */}
-        <div style={{ display: 'grid', gap: '12px' }}>
-          {deviceStatusList
-            .filter(device => showAllDevices || device.connectionStatus !== 'offline')
-            .sort((a, b) => {
-              // 接続状況順でソート
-              const statusOrder: Record<string, number> = { 
-                excellent: 0, 
-                good: 1, 
-                weak: 2, 
-                poor: 3, 
-                offline: 4 
-              };
-              return (statusOrder[a.connectionStatus] || 99) - (statusOrder[b.connectionStatus] || 99);
-            })
-            .map(device => {
-              const display = getConnectionDisplay(device.connectionStatus, device.rssiValue || undefined);
-              const distance = device.rssiValue ? estimateDistance(device.rssiValue) : -1;
-              const isInBus = activeDevices.some(active => active.id === device.id);
-              
-              return (
-                <div
-                  key={device.id}
-                  style={{
-                    padding: '16px',
-                    backgroundColor: display.bgColor,
-                    borderRadius: '8px',
-                    border: `2px solid ${display.color}`,
-                    opacity: device.connectionStatus === 'offline' ? 0.7 : 1
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                        <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold' }}>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: '2fr 1fr',
+        gap: '24px',
+        marginBottom: '24px'
+      }}>
+        {/* バス内デバイス一覧 */}
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '12px', 
+          padding: '24px', 
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)' 
+        }}>
+          <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {showAllDevices ? 
+              `全デバイス (${displayDevices.length}台)` : 
+              `バス内のデバイス (${displayDevices.length}台)`
+            }
+          </h3>
+          
+          <div style={{ 
+            marginBottom: '16px', 
+            padding: '12px', 
+            backgroundColor: '#F0F8FF', 
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#1976D2',
+            border: '1px solid #E3F2FD'
+          }}>
+            <strong>判定基準:</strong> 監視ビーコンから RSSI {rssiThreshold}dBm以上 かつ 5分以内の受信
+            {showAllDevices && (
+              <div style={{ marginTop: '4px', fontSize: '12px', color: '#FF6B00' }}>
+                ⚠️ 全デバイス表示モード: バス外のデバイスも含みます
+              </div>
+            )}
+          </div>
+          
+          {displayDevices.length > 0 ? (
+            <div style={{ display: 'grid', gap: '12px' }}>
+              {displayDevices.map(device => {
+                const latestBleData = device.bleData?.find(ble => ble.beaconId === selectedBeacon);
+                const distance = latestBleData ? estimateDistance(latestBleData.rssi) : -1;
+                const rssiPercentage = latestBleData ? Math.max(0, Math.min(100, ((latestBleData.rssi + 90) / 60) * 100)) : 0;
+                
+                const isInBus = showAllDevices ? 
+                  activeDevices.some(activeDevice => activeDevice.id === device.id) :
+                  true;
+
+                const containerStyle = {
+                  padding: '16px',
+                  backgroundColor: isInBus ? '#F8F9FA' : '#FFF3E0',
+                  borderRadius: '8px',
+                  border: isInBus ? '2px solid #E8F5E8' : '2px solid #FFE0B2'
+                };
+
+                const statusIndicatorColor = isInBus ? '#4CAF50' : '#FF9800';
+                
+                return (
+                  <div
+                    key={device.id}
+                    style={containerStyle}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 'bold' }}>
                           {device.name}
+                          {showAllDevices && (
+                            <span style={{ 
+                              marginLeft: '8px', 
+                              fontSize: '12px', 
+                              padding: '2px 6px', 
+                              borderRadius: '4px',
+                              backgroundColor: isInBus ? '#E8F5E8' : '#FFF3E0',
+                              color: isInBus ? '#2E7D32' : '#F57C00'
+                            }}>
+                              {isInBus ? '🚌 バス内' : '📶 バス外'}
+                            </span>
+                          )}
                         </h4>
-                        {isInBus && (
-                          <span style={{
-                            padding: '2px 8px',
-                            backgroundColor: '#4CAF50',
-                            color: 'white',
-                            borderRadius: '12px',
-                            fontSize: '10px',
-                            fontWeight: 'bold'
-                          }}>
-                            バス内
-                          </span>
+                        {device.deviceId && device.deviceId !== device.name && (
+                          <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666', fontFamily: 'monospace' }}>
+                            ID: {device.deviceId}
+                          </p>
                         )}
                       </div>
-                      {device.deviceId && device.deviceId !== device.name && (
-                        <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666', fontFamily: 'monospace' }}>
-                          ID: {device.deviceId}
-                        </p>
-                      )}
+                      <div style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '50%',
+                        backgroundColor: statusIndicatorColor
+                      }} />
                     </div>
                     
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ fontSize: '24px' }}>{display.icon}</div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '14px', fontWeight: 'bold', color: display.color }}>
-                          {display.text}
-                        </div>
-                        {device.connectionStatus !== 'offline' && device.rssiValue && (
-                          <div style={{ fontSize: '12px', color: '#666' }}>
-                            {device.rssiValue}dBm
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 信号強度情報 */}
-                  {device.connectionStatus !== 'offline' && device.rssiValue ? (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '14px' }}>
                       <div>
-                        <strong style={{ fontSize: '12px', color: '#666' }}>📶 信号強度</strong>
+                        <strong>信号強度</strong>
                         <div style={{ marginTop: '4px' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: display.color }}>
-                            {device.rssiValue} dBm
+                          <div style={{
+                            fontSize: '16px',
+                            fontWeight: 'bold',
+                            color: latestBleData && latestBleData.rssi >= -60 ? '#4CAF50' : 
+                                   latestBleData && latestBleData.rssi >= -70 ? '#FF9800' : '#F44336'
+                          }}>
+                            {latestBleData?.rssi || 'N/A'} dBm
                           </div>
                           <div style={{
                             width: '100%',
                             height: '4px',
                             backgroundColor: '#E0E0E0',
                             borderRadius: '2px',
-                            marginTop: '2px'
+                            marginTop: '4px'
                           }}>
                             <div style={{
-                              width: `${getRssiBarWidth(device.rssiValue)}%`,
+                              width: `${rssiPercentage}%`,
                               height: '100%',
-                              backgroundColor: display.color,
+                              backgroundColor: latestBleData && latestBleData.rssi >= -60 ? '#4CAF50' : 
+                                             latestBleData && latestBleData.rssi >= -70 ? '#FF9800' : '#F44336',
                               borderRadius: '2px'
                             }} />
                           </div>
                         </div>
                       </div>
                       
-                      <div>
-                        <strong style={{ fontSize: '12px', color: '#666' }}>📏 推定距離</strong>
+                      {/* <div>
+                        <strong>推定距離</strong>
                         <div style={{ marginTop: '4px' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>
+                          <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>
                             {distance > 0 ? `${distance.toFixed(1)}m` : 'N/A'}
                           </div>
                         </div>
-                      </div>
-
-                      <div>
-                        <strong style={{ fontSize: '12px', color: '#666' }}>⏱️ 品質</strong>
-                        <div style={{ marginTop: '4px' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: display.color }}>
-                            {(() => {
-                              if (device.rssiValue >= -50) return '優秀';
-                              if (device.rssiValue >= -60) return '良好';
-                              if (device.rssiValue >= -70) return '普通';
-                              if (device.rssiValue >= -80) return '弱い';
-                              return '貧弱';
-                            })()}
-                          </div>
-                        </div>
-                      </div>
+                      </div> */}
                     </div>
-                  ) : (
-                    <div style={{ 
-                      padding: '12px', 
-                      textAlign: 'center', 
-                      backgroundColor: 'rgba(158, 158, 158, 0.1)',
-                      borderRadius: '4px',
-                      marginBottom: '12px'
-                    }}>
-                      <div style={{ fontSize: '14px', color: '#666' }}>通信データなし</div>
+                    
+                    <div style={{ marginTop: '12px', fontSize: '12px', color: '#666' }}>
+                      最終受信: {latestBleData ? new Date(latestBleData.timestamp).toLocaleString('ja-JP') : 'N/A'}
                     </div>
-                  )}
-
-                  {/* 最終通信時間 */}
-                  <div style={{ fontSize: '12px', color: '#666', borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: '8px' }}>
-                    {device.lastConnectionTime ? (
-                      <>
-                        🕐 最終通信: {device.lastConnectionTime.toLocaleString('ja-JP')}
-                        {device.timeSinceLastConnection && (
-                          <span style={{ marginLeft: '8px' }}>
-                            ({Math.floor(device.timeSinceLastConnection / 60000)}分前)
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      '🕐 通信履歴なし'
-                    )}
                   </div>
-
-                  {/* オフライン警告 */}
-                  {device.connectionStatus === 'offline' && device.lastConnectionTime && (
-                    <div style={{
-                      marginTop: '8px',
-                      padding: '8px',
-                      backgroundColor: '#FFEBEE',
-                      borderRadius: '4px',
-                      border: '1px solid #F44336',
-                      fontSize: '12px',
-                      color: '#D32F2F'
-                    }}>
-                      ⚠️ 通信が途絶えています。デバイスの状態を確認してください。
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>📶</div>
+              <h4 style={{ margin: '0 0 8px 0' }}>
+                {showAllDevices ? 'デバイスがありません' : 'バス内のデバイスはありません'}
+              </h4>
+              <p style={{ margin: 0, fontSize: '14px' }}>
+                {showAllDevices ? 
+                  'ビーコンからの信号を受信しているデバイスがありません' :
+                  `RSSI ${rssiThreshold}dBm以上のデバイスが検出されていません`
+                }
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* フィルタ結果の表示 */}
-        {!showAllDevices && (
-          <div style={{ 
-            marginTop: '16px', 
-            padding: '12px', 
-            backgroundColor: '#E3F2FD', 
-            borderRadius: '6px',
-            fontSize: '14px',
-            color: '#1976D2',
-            textAlign: 'center'
+        {/* 設定パネル */}
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '12px', 
+          padding: '24px', 
+          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)' 
+        }}>
+          <h3 style={{ marginBottom: '16px' }}>⚙️ 設定</h3>
+          
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px',
+            marginBottom: '24px'
           }}>
-            💡 オフラインデバイス {deviceStatusList.filter(d => d.connectionStatus === 'offline').length}台を非表示中。
-            全て表示するには上記の「全デバイス表示」を有効にしてください。
-          </div>
-        )}
-      </div>
-
-      {/* バス外デバイスの参考表示を追加 */}
-      {(() => {
-        const busOutsideDevices = devices.filter(device => {
-          if (!selectedBeacon || !device.bleData) return false;
-          const latestBleData = device.bleData.find(ble => ble && ble.beaconId === selectedBeacon);
-          if (!latestBleData) return false;
-
-          try {
-            const bleTimestamp = new Date(latestBleData.timestamp);
-            const timeSinceLastBle = new Date().getTime() - bleTimestamp.getTime();
-            const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
-            const isWithinBusRange = latestBleData.rssi >= rssiThreshold;
-            
-            return isRecentlyReceived && !isWithinBusRange;
-          } catch {
-            return false;
-          }
-        });
-
-        if (busOutsideDevices.length > 0) {
-          return (
-            <div className="card" style={{ marginTop: '16px' }}>
-              <h4 style={{ fontSize: '16px', color: '#FF9800', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                📡 バス外参考情報 ({busOutsideDevices.length}台)
-              </h4>
-              <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>
-                受信はしているがRSSI {rssiThreshold}dBm未満のデバイス
+          
+          {/* ビーコン選択 */}
+          <div>
+            <label style={{ 
+              display: 'block', 
+              marginBottom: '8px', 
+              fontWeight: '600', 
+              color: '#333' 
+            }}>
+              監視対象ビーコン
+            </label>
+            <select
+              style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: '6px',
+                border: '1px solid #ddd',
+                fontSize: '14px'
+              }}
+              value={selectedBeacon}
+              onChange={(e) => handleSelectedBeaconChange(e.target.value)}
+            >
+              <option value="">選択してください</option>
+              {beacons.map(beacon => (
+                <option key={beacon.id} value={beacon.id}>
+                  {beacon.name} {beacon.mac && `(${beacon.mac})`}
+                </option>
+              ))}
+            </select>
+            {selectedBeacon && (
+              <div style={{ 
+                marginTop: '8px', 
+                padding: '12px', 
+                backgroundColor: '#E8F5E8', 
+                borderRadius: '6px',
+                fontSize: '14px',
+                border: '1px solid #C8E6C9'
+              }}>
+                <p style={{ margin: '0 0 4px 0', fontWeight: 'bold', color: '#2E7D32' }}>
+                  ✅ 選択中: {beacons.find(b => b.id === selectedBeacon)?.name}
+                </p>
+                <p style={{ margin: 0, color: '#666' }}>
+                  MAC: {beacons.find(b => b.id === selectedBeacon)?.mac || '未設定'}
+                </p>
               </div>
-              <div style={{ display: 'grid', gap: '8px' }}>
-                {busOutsideDevices.map(device => {
-                  const latestBleData = device.bleData?.find(ble => ble && ble.beaconId === selectedBeacon);
-                  const distance = latestBleData ? estimateDistance(latestBleData.rssi) : -1;
-                  
-                  return (
-                    <div
-                      key={device.id}
-                      style={{
-                        padding: '12px',
-                        backgroundColor: '#FFF8E1',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        border: '1px solid #FFE082'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <strong>{device.name}</strong>
-                          <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
-                            RSSI: {latestBleData?.rssi}dBm
-                            {distance > 0 && ` (推定${distance.toFixed(1)}m)`}
-                          </div>
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#FF9800' }}>範囲外</div>
-                      </div>
-                    </div>
-                  );
-                })}
+            )}
+          </div>
+
+          {/* 範囲設定または RSSI設定 */}
+          {isExternallyControlled && onBusRangeChange ? (
+            // 外部制御時は範囲設定を表示
+            <div>
+              <label style={{ 
+                display: 'block', 
+                marginBottom: '8px', 
+                fontWeight: '600', 
+                color: '#333' 
+              }}>
+                バス内有効範囲: {busRange}m
+              </label>
+              <input
+                type="range"
+                style={{
+                  width: '100%',
+                  marginBottom: '8px'
+                }}
+                value={busRange}
+                onChange={(e) => handleBusRangeChange(Number(e.target.value))}
+                min={1}
+                max={20}
+                step={0.5}
+              />
+              <input
+                type="number"
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #ddd',
+                  fontSize: '14px'
+                }}
+                value={busRange}
+                onChange={(e) => handleBusRangeChange(Number(e.target.value))}
+                min={1}
+                max={20}
+                step={0.5}
+              />
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                📶 対応RSSI: {rssiThreshold}dBm以上でバス内と判定
               </div>
             </div>
-          );
-        }
-        return null;
-      })()}
+          ) : (
+            // 内部制御時はRSSI設定を表示
+            <div>
+              <label style={{ 
+                display: 'block', 
+                marginBottom: '8px', 
+                fontWeight: '600', 
+                color: '#333' 
+              }}>
+                バス内判定RSSI閾値: {rssiThreshold}dBm
+              </label>
+              <input
+                type="range"
+                style={{
+                  width: '100%',
+                  marginBottom: '8px'
+                }}
+                value={rssiThreshold}
+                onChange={(e) => handleRssiThresholdChange(Number(e.target.value))}
+                min={-90}
+                max={-30}
+                step={5}
+              />
+              <input
+                type="number"
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  borderRadius: '4px',
+                  border: '1px solid #ddd',
+                  fontSize: '14px'
+                }}
+                value={rssiThreshold}
+                onChange={(e) => handleRssiThresholdChange(Number(e.target.value))}
+                min={-90}
+                max={-30}
+                step={5}
+              />
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                📐 推定範囲: 約{estimateDistance(rssiThreshold).toFixed(1)}m以内
+              </div>
+            </div>
+          )}
 
-      {/* 使い方説明を更新 */}
-      <div className="card" style={{ marginTop: '24px' }}>
-        <h3 style={{ marginBottom: '16px' }}>📖 機能2: バス置き去り検知について</h3>
-        
-        <div style={{ 
-          marginBottom: '20px', 
-          padding: '16px', 
-          backgroundColor: '#E3F2FD', 
-          borderRadius: '8px',
-          border: '1px solid #BBDEFB'
-        }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#1976D2' }}>🎯 検知の仕組み</h4>
-          <ol style={{ paddingLeft: '20px', lineHeight: '1.8', color: '#1976D2', margin: 0 }}>
-            <li>バスにビーコンを1台設置し、監視対象として選択</li>
-            <li><strong>RSSI閾値でバス内の範囲を定義</strong>（電波強度による距離判定）</li>
-            <li>各トラッカーがビーコンからのBLE信号を受信し、リアルタイムで監視</li>
-            <li>RSSI閾値以上の信号を受信しているトラッカーが<strong>1台のみ</strong>の状態が設定時間続くと警告</li>
-            <li>複数台または0台の場合は正常状態として扱う</li>
-          </ol>
-        </div>
+          {/* 警告時間設定 */}
+          <div>
+            <label style={{ 
+              display: 'block', 
+              marginBottom: '8px', 
+              fontWeight: '600', 
+              color: '#333' 
+            }}>
+              警告までの時間: {alertThreshold}分
+            </label>
+            <input
+              type="range"
+              style={{
+                width: '100%',
+                marginBottom: '8px'
+              }}
+              value={alertThreshold}
+              onChange={(e) => handleAlertThresholdChange(Number(e.target.value))}
+              min={1}
+              max={10}
+            />
+            <input
+              type="number"
+              style={{
+                width: '100%',
+                padding: '8px',
+                borderRadius: '4px',
+                border: '1px solid #ddd',
+                fontSize: '14px'
+              }}
+              value={alertThreshold}
+              onChange={(e) => handleAlertThresholdChange(Number(e.target.value))}
+              min={1}
+              max={10}
+            />
+          </div>
 
-        <div style={{ 
-          padding: '16px', 
-          backgroundColor: '#FFF3CD', 
-          borderRadius: '8px',
-          border: '1px solid #FFE082'
-        }}>
-          <h4 style={{ margin: '0 0 12px 0', color: '#856404' }}>⚠️ 重要な注意事項</h4>
-          <ul style={{ paddingLeft: '20px', lineHeight: '1.6', color: '#856404', margin: 0 }}>
-            <li><strong>GPS機能との干渉:</strong> BLE通信中はGPS測位が困難になる場合があります</li>
-            <li><strong>環境による影響:</strong> 電波強度は周囲の環境（金属、建物など）により変動します</li>
-            <li><strong>閾値の調整:</strong> 実際の運用前に適切なRSSI閾値をテストして設定してください</li>
-            <li><strong>緊急時対応:</strong> 警告発生時は必ず目視確認も併用してください</li>
-            <li><strong>電池残量:</strong> ビーコンとトラッカーの電池残量を定期的に確認してください</li>
-          </ul>
+          {/* 各種トグルボタン */}
+          {[
+            { label: '置き去り警告', value: alertEnabled, handler: handleAlertEnabledChange },
+            { label: '警告音', value: alertSound, handler: handleAlertSoundChange },
+            { label: '全デバイス表示', value: showAllDevices, handler: handleShowAllDevicesChange }
+          ].map(({ label, value, handler }) => (
+            <div key={label}>
+              <label style={{ 
+                display: 'block', 
+                marginBottom: '8px', 
+                fontWeight: '600', 
+                color: '#333' 
+              }}>
+                {label}
+              </label>
+              <button
+                onClick={() => handler(!value)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  borderRadius: '25px',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  backgroundColor: value ? '#4CAF50' : '#E0E0E0',
+                  color: value ? 'white' : '#666',
+                  transition: 'all 0.3s ease',
+                  width: '100%'
+                }}
+              >
+                <div
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    backgroundColor: 'white'
+                  }}
+                />
+                {value ? '有効' : '無効'}
+              </button>
+              {label === '全デバイス表示' && (
+                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                  {value ? 'バス外のデバイスも表示されます' : 'バス内のデバイスのみ表示されます'}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* テスト警告音ボタン */}
+          <button
+            onClick={playAlertSound}
+            style={{
+              width: '100%',
+              padding: '12px',
+              borderRadius: '6px',
+              border: '1px solid #ddd',
+              backgroundColor: 'white',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            🔊 警告音をテスト
+          </button>
+
+          {/* 現在の設定状況を表示 */}
+          <div style={{
+            padding: '12px',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '6px',
+            fontSize: '12px',
+            color: '#666'
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#333' }}>設定状況</div>
+            <div>制御モード: {isExternallyControlled ? '外部制御' : '内部制御'}</div>
+            <div>選択ビーコン: {selectedBeacon || '未選択'}</div>
+            <div>有効範囲: {busRange}m</div>
+            <div>RSSI閾値: {rssiThreshold}dBm</div>
+            <div>警告時間: {alertThreshold}分</div>
+          </div>
         </div>
+      </div>
       </div>
     </div>
   );

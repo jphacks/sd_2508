@@ -273,64 +273,6 @@ export default function ModeSelector({
               <div style={{
                 marginBottom: '16px'
               }}>
-                <div style={{
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  color: available ? '#333' : '#999',
-                  marginBottom: '8px'
-                }}>
-                  ✨ 主な機能
-                </div>
-                <div style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: '6px'
-                }}>
-                  {details.features.map(feature => (
-                    <span
-                      key={feature}
-                      style={{
-                        fontSize: '11px',
-                        padding: '4px 8px',
-                        backgroundColor: isActive 
-                          ? `${config.color}20` 
-                          : available 
-                            ? '#f8f9fa' 
-                            : '#f0f0f0',
-                        color: isActive 
-                          ? config.color 
-                          : available 
-                            ? '#666' 
-                            : '#999',
-                        borderRadius: '12px',
-                        fontWeight: '500'
-                      }}
-                    >
-                      {feature}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* 要件 */}
-              <div style={{
-                padding: '12px',
-                backgroundColor: isActive 
-                  ? `${config.color}10` 
-                  : available 
-                    ? '#f8f9fa' 
-                    : '#f0f0f0',
-                borderRadius: '8px',
-                fontSize: '11px',
-                color: available ? '#666' : '#999',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}>
-                <span>{available ? '💡' : '⚠️'}</span>
-                <span>
-                  {available ? `要件: ${details.requirement}` : `利用不可: ${details.requirement}`}
-                </span>
               </div>
 
               {/* 選択ボタン（非アクティブ時のみ表示） */}
@@ -401,27 +343,6 @@ export default function ModeSelector({
           fontWeight: 'bold'
         }}>
           ✓ アクティブ
-        </div>
-      </div>
-
-      {/* 注意事項 */}
-      <div style={{
-        marginTop: '16px',
-        padding: '12px',
-        backgroundColor: '#fff3cd',
-        border: '1px solid #ffeaa7',
-        borderRadius: '8px',
-        fontSize: '12px',
-        color: '#856404',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '8px'
-      }}>
-        <span style={{ fontSize: '14px' }}>💡</span>
-        <div>
-          <strong>モード切り替えについて:</strong><br />
-          モードを変更すると、表示される情報とアラートの種類が変わります。
-          デバイスの設定や環境に応じて適切なモードを選択してください。
         </div>
       </div>
     </div>

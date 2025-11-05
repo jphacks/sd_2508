@@ -179,7 +179,7 @@ export default function DistanceMonitor({
       if (device.deviceId === parentDeviceId || !device.position) return;
 
       const currentDistance = calculateDistance(parentDevice.position, device.position);
-      const previousStatus = distanceStatuses[device.deviceId];
+      const previousStatus = distanceStatuses[device.id];
       const previousDistance = previousStatus?.currentDistance || currentDistance;
       
       const alertLevel = getAlertLevel(currentDistance);
@@ -264,7 +264,7 @@ export default function DistanceMonitor({
       const alertId = `alert-${device.deviceId}-${now}`;
       setActiveAlerts(prev => ({
         ...prev,
-        [device.deviceId]: {
+        [device.id]: {
           id: alertId,
           deviceId: device.deviceId,
           alertLevel: alertLevel as 'warning' | 'danger',

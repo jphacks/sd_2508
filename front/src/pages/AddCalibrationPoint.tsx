@@ -30,6 +30,22 @@ export default function AddCalibrationPoint() {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    return () => {
+      if (trackerRefRef.current) {
+        off(trackerRefRef.current);
+        trackerRefRef.current = null;
+      }
+
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+
+      listenerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     loadRoom();
     loadDevices();
   }, [roomId]);

@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
-import { ref, onValue } from 'firebase/database';
 import { collection, getDocs } from 'firebase/firestore';
-import { db, rtdb } from '../firebase';
+import { db } from '../firebase';
 import { MapContainer, TileLayer, Marker, Circle, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import { calculateGPSDistance } from '../utils/positioning';
 
+// 🔥 共通typesから使用
+import { Device } from '../types';
+
 // Leafletのデフォルトアイコンの問題を修正
 import 'leaflet/dist/leaflet.css';
 
-// デフォルトアイコンの修正
+// デフォルトアイコンの修正（変更なし）
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -17,24 +19,15 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// 型定義
-interface TrackerDevice {
-  id: string;
-  deviceId?: string;
-  devEUI?: string;
-  name: string;
-  userName?: string;
-  bleData?: any[];
-  position?: {
-    lat: number;
-    lon: number;
-    timestamp?: string;
-    accuracy?: number;
-  };
-  lastUpdate?: Date;
+// 🔥 重複するTrackerDevice型定義を削除し、共通Device型を使用
+type TrackerDevice = Device;
+
+// 🔥 TestUnifiedComponentsからのデータを受け取るためのProps
+interface Mode3Props {
+  devices?: Device[];  // 外部から渡されるデバイスデータ
 }
 
-// アイコンの定義
+// アイコンの定義（変更なし）
 const parentIcon = new L.Icon({
   iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -62,8 +55,9 @@ const alertIcon = new L.Icon({
   shadowSize: [41, 41]
 });
 
-export default function Mode3GPS() {
-  const [trackers, setTrackers] = useState<TrackerDevice[]>([]);
+export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) {
+  // 🔥 重複するstate管理を削除し、必要最小限に
+  const [trackers, setTrackers] = useState<TrackerDevice[]>(externalDevices || []);
   const [isLoading, setIsLoading] = useState(true);
   const [parentTrackers, setParentTrackers] = useState<string[]>([]);
   const [maxDistance, setMaxDistance] = useState(30);
@@ -72,29 +66,39 @@ export default function Mode3GPS() {
   const [alertSound, setAlertSound] = useState(true);
   const [mapCenter, setMapCenter] = useState({ lat: 38.2559, lon: 140.8398 });
 
-  // 初期データ読み込みとクリーンアップ
+  // 🔥 重複するuseEffectを削除し、外部データ依存に変更
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    
-    const initializeGPS = async () => {
-      await loadDevicesAndGPS();
-    };
-    
-    initializeGPS();
-
-    return () => {
-      if (cleanup) {
-        cleanup();
+    if (externalDevices) {
+      // 外部データが渡されている場合は重複読み込みをスキップ
+      setTrackers(externalDevices);
+      setIsLoading(false);
+      
+      // マップ中心位置の設定
+      const validTrackers = externalDevices.filter(tracker => tracker.position);
+      if (validTrackers.length > 0) {
+        const avgLat = validTrackers.reduce((sum, t) => sum + (t.position!.lat), 0) / validTrackers.length;
+        const avgLon = validTrackers.reduce((sum, t) => sum + (t.position!.lon), 0) / validTrackers.length;
+        setMapCenter({ lat: avgLat, lon: avgLon });
       }
-    };
-  }, []);
+    } else {
+      // 従来の独立読み込み（TestUnifiedComponents以外から使用される場合）
+      loadDevicesAndGPS();
+    }
+  }, [externalDevices]);
 
-  // デバイス一覧とGPS情報を読み込み
+  // 🔥 外部データの更新を反映
+  useEffect(() => {
+    if (externalDevices) {
+      setTrackers(externalDevices);
+    }
+  }, [externalDevices]);
+
+  // 🔥 重複するloadDevicesAndGPS関数を簡素化（独立使用時のみ）
   const loadDevicesAndGPS = async () => {
     try {
       setIsLoading(true);
       
-      // 1. Firestoreからデバイス一覧を取得（Mode2と同じ方式）
+      // Firestoreからデバイス一覧を取得のみ（GPS監視はTestUnifiedComponentsが担当）
       const devicesSnapshot = await getDocs(collection(db, 'devices'));
       const devicesList: TrackerDevice[] = devicesSnapshot.docs.map(doc => {
         const raw = doc.data() as any;
@@ -104,214 +108,34 @@ export default function Mode3GPS() {
           devEUI: raw.devEUI,
           name: raw.userName || raw.deviceId || doc.id,
           userName: raw.userName,
-          bleData: Array.isArray(raw.bleData) ? raw.bleData : [], // Mode2との互換性
+          bleData: Array.isArray(raw.bleData) ? raw.bleData : [],
+          position: raw.position || null,
+          lastUpdate: raw.lastUpdate || null,
+          statusData: null
         };
       });
 
-      console.log('✅ デバイス一覧取得完了:', devicesList.length, '台');
-      
-      // 2. 各デバイスのGPS情報をRealtimeDatabaseから取得
-      const trackersWithGPS: TrackerDevice[] = [];
-      
-      for (const device of devicesList) {
-        try {
-          const gpsData = await getDeviceGPS(device.devEUI);
-          const trackerWithGPS: TrackerDevice = {
-            ...device,
-            position: gpsData || undefined,
-            lastUpdate: gpsData ? new Date(gpsData.timestamp || Date.now()) : undefined
-          };
-          trackersWithGPS.push(trackerWithGPS);
-        } catch (error) {
-          console.error(`❌ ${device.name} GPS取得失敗:`, error);
-          // GPS取得失敗でもデバイス情報は保持
-          trackersWithGPS.push({
-            ...device,
-            position: undefined,
-            lastUpdate: undefined
-          });
-        }
-      }
-
-      // 3. 状態を更新
-      setTrackers(trackersWithGPS);
-
-      // 4. マップ中心位置の設定
-      const validTrackers = trackersWithGPS.filter(tracker => tracker.position);
-      if (validTrackers.length > 0) {
-        const avgLat = validTrackers.reduce((sum, t) => sum + (t.position!.lat), 0) / validTrackers.length;
-        const avgLon = validTrackers.reduce((sum, t) => sum + (t.position!.lon), 0) / validTrackers.length;
-        setMapCenter({ lat: avgLat, lon: avgLon });
-        console.log('📍 マップ中心設定:', { lat: avgLat, lon: avgLon });
-      }
-
-      console.log('✅ GPS情報取得完了:', validTrackers.length, '/', trackersWithGPS.length, '台');
-      
-      // 5. リアルタイム監視を開始
-      setupRealtimeGPSMonitoring(devicesList);
+      setTrackers(devicesList);
       
     } catch (error) {
-      console.error('❌ デバイス・GPS情報取得エラー:', error);
-      // エラー時は空配列を設定
+      console.error('デバイス情報取得エラー:', error);
       setTrackers([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 個別デバイスのGPS情報を取得（実際の構造に対応）
-  const getDeviceGPS = (devEUI?: string): Promise<{lat: number, lon: number, timestamp: string, accuracy?: number} | null> => {
-    return new Promise((resolve) => {
-      if (!devEUI) {
-        console.log('⚠️ devEUIが未設定');
-        resolve(null);
-        return;
-      }
-
-      const normalizedDevEUI = devEUI.toLowerCase();
-      // 🔥 修正: gnss部分のみ監視
-      const gnssRef = ref(rtdb, `devices/${normalizedDevEUI}/gnss`);
-      
-      let resolved = false;
-      let unsubscribe: (() => void) | null = null;
-      
-      // タイムアウト設定（5秒）
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          if (unsubscribe) unsubscribe();
-          console.log(`⏰ ${devEUI}: GPS取得タイムアウト`);
-          resolve(null);
-        }
-      }, 5000);
-      
-      unsubscribe = onValue(gnssRef, (snapshot) => {
-        if (resolved) return;
-        
-        try {
-          const gnssData = snapshot.val();
-          
-          // 🔥 修正: 実際のフィールド名に変更（lon, utc_iso）
-          if (gnssData && typeof gnssData.lat === 'number' && typeof gnssData.lon === 'number') {
-            resolved = true;
-            clearTimeout(timeout);
-            if (unsubscribe) unsubscribe();
-            
-            console.log(`📍 ${devEUI} GPS取得成功:`, {
-              lat: gnssData.lat,
-              lon: gnssData.lon,
-              utc_iso: gnssData.utc_iso
-            });
-            
-            resolve({
-              lat: gnssData.lat,
-              lon: gnssData.lon, // フロントエンドでは統一してlonを使用
-              timestamp: gnssData.utc_iso || new Date().toISOString(),
-              accuracy: undefined // accuracyは存在しない
-            });
-          } else {
-            resolved = true;
-            clearTimeout(timeout);
-            if (unsubscribe) unsubscribe();
-            console.log(`📍 ${devEUI}: GNSS情報なし`);
-            resolve(null);
-          }
-        } catch (error) {
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            if (unsubscribe) unsubscribe();
-            console.error(`❌ ${devEUI} GNSS解析エラー:`, error);
-            resolve(null);
-          }
-        }
-      }, (error) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          if (unsubscribe) unsubscribe();
-          console.error(`❌ ${devEUI} Firebase接続エラー:`, error);
-          resolve(null);
-        }
-      });
-    });
-  };
-
-  // リアルタイムGPS監視（実際の構造に対応）
-  const setupRealtimeGPSMonitoring = (devicesList: TrackerDevice[]) => {
-    const unsubscribers = devicesList.map(device => {
-      if (!device.devEUI) {
-        console.log(`⚠️ ${device.name}: devEUIなし、監視スキップ`);
-        return null;
-      }
-
-      const normalizedDevEUI = device.devEUI.toLowerCase();
-      // 🔥 修正: gnss部分のみ監視
-      const gnssRef = ref(rtdb, `devices/${normalizedDevEUI}/gnss`);
-      
-      console.log(`🔄 ${device.name} GNSS専用監視開始`);
-      
-      return onValue(gnssRef, (snapshot) => {
-        try {
-          const gnssData = snapshot.val();
-          
-          // 🔥 修正: 実際のフィールド名に変更（lon, utc_iso）
-          if (gnssData && typeof gnssData.lat === 'number' && typeof gnssData.lon === 'number') {
-            // GPS情報が更新された場合、該当デバイスを更新
-            setTrackers(prevTrackers => {
-              const updatedTrackers = prevTrackers.map(tracker => 
-                tracker.devEUI === device.devEUI 
-                  ? {
-                      ...tracker,
-                      position: {
-                        lat: gnssData.lat,
-                        lon: gnssData.lon, // フロントエンドでは統一してlonを使用
-                        timestamp: gnssData.utc_iso || new Date().toISOString(),
-                        accuracy: undefined // accuracyは存在しない
-                      },
-                      lastUpdate: new Date()
-                    }
-                  : tracker
-              );
-              
-              console.log(`🔄 ${device.name} GNSS更新:`, {
-                lat: gnssData.lat,
-                lon: gnssData.lon,
-                utc_iso: gnssData.utc_iso
-              });
-              return updatedTrackers;
-            });
-          }
-        } catch (error) {
-          console.error(`❌ ${device.name} GNSS監視エラー:`, error);
-        }
-      }, (error) => {
-        console.error(`❌ ${device.name} GNSS監視接続エラー:`, error);
-      });
-    }).filter(Boolean);
-
-    console.log(`✅ ${unsubscribers.length}台のGNSS専用監視開始`);
-
-    // クリーンアップ関数を返す
-    return () => {
-      console.log('🔄 GNSS専用監視停止');
-      unsubscribers.forEach(unsub => unsub && unsub());
-    };
-  };
-
-  // 距離チェック
+  // 距離チェック（変更なし）
   useEffect(() => {
     if (alertEnabled) {
       checkDistances();
     }
   }, [trackers, parentTrackers, maxDistance, alertEnabled]);
 
-  // checkDistances関数を完全に書き直し
-
+  // checkDistances関数（変更なし）
   const checkDistances = () => {
     const newAlerts: string[] = [];
     
-    // 最初にGPS情報があるデバイスのみフィルタリング
     const parentsWithGPS = trackers.filter(t => 
       parentTrackers.includes(t.id) && t.position
     );
@@ -319,15 +143,12 @@ export default function Mode3GPS() {
       !parentTrackers.includes(t.id) && t.position
     );
 
-    // 親トラッカーが1台以上ある場合のみ処理
     if (parentsWithGPS.length === 0) {
-      console.log('⚠️ GPS情報を持つ親トラッカーがありません');
       setAlerts([]);
       return;
     }
 
     childrenWithGPS.forEach(child => {
-      // 各子トラッカーについて、最も近い親との距離を計算
       const distances: { parent: TrackerDevice; distance: number }[] = [];
 
       parentsWithGPS.forEach(parent => {
@@ -339,41 +160,35 @@ export default function Mode3GPS() {
             child.position!.lon
           );
           
-          // 有効な距離が計算できた場合のみ記録
           if (!isNaN(distance) && distance >= 0) {
             distances.push({ parent, distance });
           }
         } catch (error) {
-          console.error(`❌ ${child.name} と ${parent.name} の距離計算エラー:`, error);
+          console.error(`${child.name} と ${parent.name} の距離計算エラー:`, error);
         }
       });
 
-      // 最も近い親を見つける
       if (distances.length > 0) {
         const nearest = distances.reduce((min, current) => 
           current.distance < min.distance ? current : min
         );
 
-        // 距離が閾値を超えている場合は警告
         if (nearest.distance > maxDistance) {
           newAlerts.push(
             `🚨 ${child.name} が ${nearest.parent.name} から ${nearest.distance.toFixed(0)}m 離れています！`
           );
         }
-      } else {
-        console.warn(`⚠️ ${child.name}: 有効な親トラッカーとの距離を計算できませんでした`);
       }
     });
 
     setAlerts(newAlerts);
 
-    // 警告音再生
     if (newAlerts.length > 0 && alertSound) {
       playAlertSound();
     }
   };
 
-  // 警告音再生
+  // 警告音再生（変更なし）
   const playAlertSound = () => {
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -392,25 +207,22 @@ export default function Mode3GPS() {
       oscillator.start();
       oscillator.stop(audioContext.currentTime + 0.5);
     } catch (error) {
-      console.error('❌ 警告音再生エラー:', error);
+      console.error('警告音再生エラー:', error);
     }
   };
 
-  // 子トラッカーが離れすぎているかチェック
+  // 子トラッカーが離れすぎているかチェック（変更なし）
   const isChildTooFar = (trackerId: string): boolean => {
     const child = trackers.find(t => t.id === trackerId);
     
-    // 基本条件チェック
     if (!child || !child.position || parentTrackers.includes(trackerId)) {
       return false;
     }
 
-    // GPS情報を持つ親トラッカーのみフィルタリング
     const parentsWithGPS = trackers.filter(t => 
       parentTrackers.includes(t.id) && t.position
     );
     
-    // 親トラッカーが1台以上ある場合のみ処理
     if (parentsWithGPS.length === 0) {
       return false;
     }
@@ -420,7 +232,6 @@ export default function Mode3GPS() {
     
     parentsWithGPS.forEach(parent => {
       try {
-        // この時点でparent.positionは確実に存在
         const distance = calculateGPSDistance(
           parent.position!.lat,
           parent.position!.lon,
@@ -428,7 +239,6 @@ export default function Mode3GPS() {
           child.position!.lon
         );
         
-        // 有効な距離が計算できた場合のみ更新
         if (!isNaN(distance) && distance >= 0) {
           hasValidDistance = true;
           if (distance < minDistance) {
@@ -436,15 +246,14 @@ export default function Mode3GPS() {
           }
         }
       } catch (error) {
-        console.error(`❌ ${child.name} の距離計算エラー:`, error);
+        console.error(`${child.name} の距離計算エラー:`, error);
       }
     });
 
-    // 有効な距離が計算できて、かつ閾値を超えている場合のみtrue
     return hasValidDistance && minDistance > maxDistance && minDistance !== Infinity;
   };
 
-  // ローディング画面
+  // 🔥 UI部分は変更なし（レンダリング部分）
   if (isLoading) {
     return (
       <div className="container">
