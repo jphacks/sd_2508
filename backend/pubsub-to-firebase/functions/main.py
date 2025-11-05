@@ -43,6 +43,12 @@ def _now_iso():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def _now_key_jst():
+    """JSTの現在時刻から "YYYY-MMDD-HHMMSS" 形式のキーを作る"""
+    jst = datetime.timezone(datetime.timedelta(hours=9))
+    return datetime.datetime.now(jst).strftime("%Y-%m%d-%H%M%S")
+
+
 def _server_ts():
     return {".sv": "timestamp"}
 
@@ -79,6 +85,17 @@ def _to_iso_jst(epoch_sec: int) -> str:
         return datetime.datetime.fromtimestamp(epoch_sec, tz=jst).isoformat()
     except Exception:
         return _now_iso()
+
+
+def _build_status(decoded: dict, ts_iso: str) -> dict:
+    """ステータス用のドキュメントを作成"""
+    return {
+        "temperature_c": decoded.get("temperature_c"),
+        "battery_pct": decoded.get("battery_pct"),
+        "light_pct": decoded.get("light_pct"),
+        "updatedAt": ts_iso,
+        "updatedAtServer": _server_ts(),
+    }
 
 
 def decode_t1000_hex(hexstr: str) -> dict:
@@ -126,7 +143,6 @@ def decode_t1000_hex(hexstr: str) -> dict:
             {
                 "event_status": event_status,
                 "motion_segment": motion_seg,
-                "utc": utc,
                 "utc_iso": _to_iso_jst(utc),
                 "lon": lon,
                 "lat": lat,
@@ -271,29 +287,42 @@ def pubsub_to_rtdb(data, context):
                 and ("lat" in decoded)
             ):
                 ts_iso = decoded.get("utc_iso") or _now_iso()
+
+                # status を作成して status ノードに保存
+                status_doc = _build_status(decoded, ts_iso)
+                db.reference(f"devices/{dev_key}/status").update(status_doc)
+
+                # GNSS スナップショット（センサー値は入れない）
                 gnss_doc = {
                     "lon": decoded["lon"],
                     "lat": decoded["lat"],
-                    "utc": decoded.get("utc"),
                     "utc_iso": ts_iso,
                     "event_status": decoded.get("event_status"),
                     "motion_segment": decoded.get("motion_segment"),
-                    "battery_pct": decoded.get("battery_pct"),
-                    "temperature_c": decoded.get("temperature_c"),
-                    "light_pct": decoded.get("light_pct"),
                     "savedAtServer": _server_ts(),
+                    "dedup_key": dedup_key,  # 任意
                 }
-
-                # スナップショット
                 db.reference(f"devices/{dev_key}/gnss").update(gnss_doc)
 
-                # 履歴（dedup キー）
-                db.reference(f"devices/{dev_key}/gnss_logs/{dedup_key}").set(gnss_doc)
+                # 履歴（ログ）: status はネストで含める
+                key = _now_key_jst()
+                db.reference(f"devices/{dev_key}/gnss_logs/{key}").set(
+                    {
+                        **gnss_doc,
+                        "status": status_doc,
+                    }
+                )
 
-            # ---- 0x08 BLE: 既存の保存処理（そのまま）----
+            # ---- 0x08 BLE: 保存 ----
             if decoded.get("frame_id") == 0x08 and decoded.get("beacons"):
                 ts_iso = decoded.get("utc_iso") or _now_iso()
                 enriched = [{**b, "ts": ts_iso} for b in decoded["beacons"]]
+
+                # status を作成して status ノードに保存
+                status_doc = _build_status(decoded, ts_iso)
+                db.reference(f"devices/{dev_key}/status").update(status_doc)
+
+                # beacons スナップショットは従来通り
                 db.reference(f"devices/{dev_key}").update(
                     {
                         "beacons": enriched,
@@ -301,16 +330,18 @@ def pubsub_to_rtdb(data, context):
                         "beaconsUpdatedAtServer": _server_ts(),
                     }
                 )
-                db.reference(f"devices/{dev_key}/beacon_logs/{dedup_key}").set(
-                    {
-                        "beacons": enriched,
-                        "battery_pct": decoded.get("battery_pct"),
-                        "temperature_c": decoded.get("temperature_c"),
-                        "light_pct": decoded.get("light_pct"),
-                        "savedAt": ts_iso,
-                        "savedAtServer": _server_ts(),
-                    }
-                )
+
+                # 履歴（ログ）: status はネストで含める
+                # key = _now_key_jst()
+                # db.reference(f"devices/{dev_key}/beacon_logs/{key}").set(
+                #     {
+                #         "beacons": enriched,
+                #         "savedAt": ts_iso,
+                #         "savedAtServer": _server_ts(),
+                #         "dedup_key": dedup_key,  # 任意
+                #         "status": status_doc,
+                #     }
+                # )
                 # print("Saved beacons from T1000 0x08")
         except Exception as e:
             print(f"WARN: inner payload base64 decode failed: {e}")
