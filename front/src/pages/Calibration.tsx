@@ -149,7 +149,6 @@ export default function Calibration() {
   const [step, setStep] = useState(0);
   const [roomName, setRoomName] = useState('');
   const [selectedBeacons, setSelectedBeacons] = useState<string[]>([]);
-  const [doorBeaconId, setDoorBeaconId] = useState<string>('');
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
@@ -188,6 +187,18 @@ export default function Calibration() {
   const isFurnitureEditMode = location.pathname.includes('/edit-furniture/');
   const [isEditMode, setIsEditMode] = useState(false); // 編集モードかどうか
   const [originalRoomData, setOriginalRoomData] = useState<RoomProfile | null>(null);
+
+  // 選択されたビーコンに基づいて動的なビーコンリストを生成
+  const currentBeacons = useMemo(() => {
+    return selectedBeacons.map((beaconId, index) => {
+      const beaconData = beacons.find(b => b.firestoreId === beaconId);
+      return {
+        id: beaconId,
+        name: beaconData?.name || beaconData?.beaconId || `ビーコン${index + 1}`,
+        position: { x: 0.1 + index * 0.4, y: 0.1 } // デフォルト位置
+      };
+    });
+  }, [selectedBeacons, beacons]);
 
   
   // 測定キャンセル用
@@ -237,16 +248,17 @@ export default function Calibration() {
     furniture,
     selectedFurniture, 
     selectedBeacon,
-    Object.keys(beaconPositions).length,
+    beaconPositions,
     originalRoomData,
     currentRoomSize.width,
     currentRoomSize.height,
     showFurniture,
     step,
     calibrationPoints.length,
-    doorPosition.x, // ←追加
-    doorPosition.y, // ←追加
-    isDraggingDoor // ←追加
+    doorPosition.x,
+    doorPosition.y,
+    isDraggingDoor,
+    currentBeacons
   ]);
 
   useEffect(() => {
@@ -278,7 +290,6 @@ export default function Calibration() {
         setOriginalRoomData(roomData);
         setRoomName(roomData.name);
         setSelectedBeacons(roomData.beacons || []);
-        setDoorBeaconId(roomData.doorBeaconId || '');
         setFurniture(roomData.furniture || []);
         setCalibrationPoints(roomData.calibrationPoints || []);
         setIsEditMode(true);
@@ -330,18 +341,6 @@ export default function Calibration() {
     setBeacons(data);
   };
 
-  useEffect(() => {
-    if (selectedBeacons.length === 0) {
-      if (doorBeaconId) {
-        setDoorBeaconId('');
-      }
-      return;
-    }
-
-    if (!doorBeaconId || !selectedBeacons.includes(doorBeaconId)) {
-      setDoorBeaconId(selectedBeacons[0]);
-    }
-  }, [selectedBeacons, doorBeaconId]);
 
   const getBeaconDisplayName = (firestoreId: string) => {
     const beacon = beacons.find(b => b.firestoreId === firestoreId);
@@ -531,7 +530,7 @@ export default function Calibration() {
     });
 
     // ビーコンを描画（座標変換適用）
-    TEST_ROOM.beacons.forEach(beacon => {
+    currentBeacons.forEach(beacon => {
       const position = beaconPositions[beacon.id] || beacon.position;
       
       const beaconPos = showFurniture 
@@ -553,7 +552,7 @@ export default function Calibration() {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
       ctx.fill();
 
-      ctx.fillStyle = '#4A90E2';
+      ctx.fillStyle = '#FF9800';
       ctx.beginPath();
       ctx.arc(beaconPos.x, beaconPos.y, 8, 0, 2 * Math.PI);
       ctx.fill();
@@ -571,23 +570,26 @@ export default function Calibration() {
       ctx.arc(beaconPos.x, beaconPos.y, 4, 0, 2 * Math.PI);
       ctx.fill();
       
-      // ビーコン名（背景付き）
+      // ビーコン名（背景付き、下に表示）
       ctx.font = '12px Arial';
-      ctx.textAlign = 'left';
+      ctx.textAlign = 'center';
       
       const textMetrics = ctx.measureText(beacon.name);
       const textWidth = textMetrics.width + 8;
       const textHeight = 16;
       
+      const labelX = beaconPos.x - textWidth / 2;
+      const labelY = beaconPos.y + 18;
+      
       ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.fillRect(beaconPos.x + 12, beaconPos.y - 8, textWidth, textHeight);
+      ctx.fillRect(labelX, labelY, textWidth, textHeight);
 
       ctx.strokeStyle = '#2C3E50';
       ctx.lineWidth = 1;
-      ctx.strokeRect(beaconPos.x + 12, beaconPos.y - 8, textWidth, textHeight);
+      ctx.strokeRect(labelX, labelY, textWidth, textHeight);
 
       ctx.fillStyle = '#2C3E50';
-      ctx.fillText(beacon.name, beaconPos.x + 16, beaconPos.y + 4);
+      ctx.fillText(beacon.name, beaconPos.x, labelY + 12);
     });
 
     // キャリブレーションポイントを描画（座標変換適用）
@@ -872,10 +874,6 @@ export default function Calibration() {
       return;
     }
     
-    if (!doorBeaconId) {
-      alert('ドア付近のビーコンが選択されていません');
-      return;
-    }
 
     // 部屋サイズの処理：入力されていればメートル単位、なければundefined
     const parsedWidth = roomWidth ? parseFloat(roomWidth) : null;
@@ -893,33 +891,16 @@ export default function Calibration() {
       height: item.height / TEST_ROOM.height
     }));
 
-    // ビーコン位置も正規化して保存（将来的にドラッグ配置可能にする）
-    const normalizedBeacons = TEST_ROOM.beacons.map(beacon => ({
-      id: beacon.id,
-      name: beacon.name,
-      position: {
-        x: beacon.position.x / TEST_ROOM.width,
-        y: beacon.position.y / TEST_ROOM.height
-      }
-    }));
-
-    // ビーコン位置を更新されたものに変更
-    const updatedBeacons = TEST_ROOM.beacons.map(beacon => ({
+    // ビーコン位置を保存用に整形
+    const beaconPositionsArray = currentBeacons.map(beacon => ({
       id: beacon.id,
       name: beacon.name,
       position: beaconPositions[beacon.id] || beacon.position
     }));
 
-    const beaconPositionsArray = Object.entries(beaconPositions).map(([id, position]) => ({
-      id,
-      name: TEST_ROOM.beacons.find(b => b.id === id)?.name || `ビーコン${id}`,
-      position
-    }));
-
     const roomProfile: Partial<RoomProfile> = {
       name: roomName,
       beacons: selectedBeacons,
-      doorBeaconId: doorBeaconId || null,
       calibrationPoints: calibrationPoints,
       outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
       furniture: furniture,
@@ -968,19 +949,20 @@ export default function Calibration() {
     const widthAdjustment = 1 + 2 * margin / safeWidth;
     const heightAdjustment = 1 + 2 * margin / safeHeight;
 
+    // 重要: 実際の表示サイズ（rect.width/height）を使用
     const startX = showFurniture
-      ? item.position.x * canvas.width
-      : ((item.position.x + margin / safeWidth) / widthAdjustment) * canvas.width;
+      ? item.position.x * rect.width
+      : ((item.position.x + margin / safeWidth) / widthAdjustment) * rect.width;
     const startY = showFurniture
-      ? item.position.y * canvas.height
-      : ((item.position.y + margin / safeHeight) / heightAdjustment) * canvas.height;
+      ? item.position.y * rect.height
+      : ((item.position.y + margin / safeHeight) / heightAdjustment) * rect.height;
 
     const widthPx = showFurniture
-      ? item.width * canvas.width
-      : (item.width / widthAdjustment) * canvas.width;
+      ? item.width * rect.width
+      : (item.width / widthAdjustment) * rect.width;
     const heightPx = showFurniture
-      ? item.height * canvas.height
-      : (item.height / heightAdjustment) * canvas.height;
+      ? item.height * rect.height
+      : (item.height / heightAdjustment) * rect.height;
 
     const handles = [
       { x: startX + widthPx - handleSize / 2, y: startY + heightPx - handleSize / 2, type: 'se' as const },
@@ -1002,55 +984,6 @@ export default function Calibration() {
     return null;
   };
 
-  // handleCanvasClick関数を修正
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    let x = (e.clientX - rect.left) / canvas.width;
-    let y = (e.clientY - rect.top) / canvas.height;
-
-    // キャリブレーション時は座標変換を適用
-    if (!showFurniture) {
-      const margin = 0.15;
-      const effectiveWidth = currentRoomSize.width + (margin * 2);
-      const effectiveHeight = currentRoomSize.height + (margin * 2);
-      
-      // キャンバス座標から正規化座標に逆変換
-      x = (x * (1 + 2 * margin / currentRoomSize.width)) - (margin / currentRoomSize.width);
-      y = (y * (1 + 2 * margin / currentRoomSize.height)) - (margin / currentRoomSize.height);
-    }
-
-    // ビーコンのクリック判定（円形）
-    const clickedBeacon = TEST_ROOM.beacons.find(beacon => {
-      const position = beaconPositions[beacon.id] || beacon.position;
-      const distance = Math.sqrt(
-        Math.pow(x - position.x, 2) + Math.pow(y - position.y, 2)
-      );
-      const beaconRadius = 12 / Math.min(canvas.width, canvas.height);
-      return distance <= beaconRadius;
-    });
-
-    // 家具のクリック判定（矩形）
-    const clickedFurniture = furniture.find(item => {
-      return x >= item.position.x && 
-            x <= item.position.x + item.width &&
-            y >= item.position.y && 
-            y <= item.position.y + item.height;
-    });
-
-    if (clickedBeacon) {
-      setSelectedBeacon(selectedBeacon === clickedBeacon.id ? null : clickedBeacon.id);
-      setSelectedFurniture(null);
-    } else if (clickedFurniture) {
-      setSelectedFurniture(selectedFurniture === clickedFurniture.id ? null : clickedFurniture.id);
-      setSelectedBeacon(null);
-    } else {
-      setSelectedFurniture(null);
-      setSelectedBeacon(null);
-    }
-  };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     // ドア位置選択ステップの場合
@@ -1062,28 +995,77 @@ export default function Calibration() {
       return;
     }
     
-    if (selectedBeacon) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    // 重要: 実際の表示サイズ（rect.width/height）で正規化する
+    let x = (e.clientX - rect.left) / rect.width;
+    let y = (e.clientY - rect.top) / rect.height;
+
+    // キャリブレーション時は座標変換を適用
+    if (!showFurniture) {
+      const margin = 0.15;
+      x = (x * (1 + 2 * margin / currentRoomSize.width)) - (margin / currentRoomSize.width);
+      y = (y * (1 + 2 * margin / currentRoomSize.height)) - (margin / currentRoomSize.height);
+    }
+
+    // 既に選択されている家具のリサイズハンドルをチェック（選択状態の場合のみ）
+    if (selectedFurniture) {
+      const selectedItem = furniture.find(f => f.id === selectedFurniture);
+      if (selectedItem) {
+        const handle = getResizeHandle(e, selectedItem);
+        if (handle) {
+          setIsResizing(true);
+          setResizeHandle(handle);
+          setOriginalSize({ width: selectedItem.width, height: selectedItem.height });
+          e.preventDefault();
+          return;
+        }
+      }
+    }
+
+    // ビーコンのクリック判定（円形）
+    const clickedBeacon = currentBeacons.find(beacon => {
+      const position = beaconPositions[beacon.id] || beacon.position;
+      const distance = Math.sqrt(
+        Math.pow(x - position.x, 2) + Math.pow(y - position.y, 2)
+      );
+      // 正規化座標での半径を計算（クリックしやすいように少し大きめに設定）
+      const beaconRadius = 0.03; // 正規化座標で約3%の範囲
+      
+      return distance <= beaconRadius;
+    });
+
+    // 家具のクリック判定（矩形）
+    const clickedFurniture = furniture.find(item => {
+      return x >= item.position.x && 
+            x <= item.position.x + item.width &&
+            y >= item.position.y && 
+            y <= item.position.y + item.height;
+    });
+
+    // ビーコンがクリックされた場合
+    if (clickedBeacon) {
+      setSelectedBeacon(clickedBeacon.id);
+      setSelectedFurniture(null);
       setIsDragging(true);
       e.preventDefault();
       return;
     }
 
-    if (!selectedFurniture) return;
-
-    const selectedItem = furniture.find(f => f.id === selectedFurniture);
-    if (!selectedItem) return;
-
-    const handle = getResizeHandle(e, selectedItem);
-    
-    if (handle) {
-      setIsResizing(true);
-      setResizeHandle(handle);
-      setOriginalSize({ width: selectedItem.width, height: selectedItem.height });
-      e.preventDefault();
-    } else {
+    // 家具がクリックされた場合
+    if (clickedFurniture) {
+      setSelectedFurniture(clickedFurniture.id);
+      setSelectedBeacon(null);
       setIsDragging(true);
       e.preventDefault();
+      return;
     }
+
+    // 何もクリックされなかった場合は選択解除
+    setSelectedFurniture(null);
+    setSelectedBeacon(null);
   };
 
   // handleCanvasMouseMove関数を修正
@@ -1092,8 +1074,9 @@ export default function Calibration() {
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    let mouseX = (e.clientX - rect.left) / canvas.width;
-    let mouseY = (e.clientY - rect.top) / canvas.height;
+    // 重要: 実際の表示サイズ（rect.width/height）で正規化する
+    let mouseX = (e.clientX - rect.left) / rect.width;
+    let mouseY = (e.clientY - rect.top) / rect.height;
 
     // キャリブレーション時は座標変換を適用
     if (!showFurniture) {
@@ -1475,35 +1458,14 @@ export default function Calibration() {
                   </button>
                 ))}
               </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">ドア付近のビーコン *</label>
-              <select
-                className="form-input"
-                value={doorBeaconId}
-                onChange={(e) => setDoorBeaconId(e.target.value)}
-                disabled={selectedBeacons.length === 0}
-              >
-                {selectedBeacons.length === 0 && (
-                  <option value="">ビーコンを選択してください</option>
-                )}
-                {selectedBeacons.length > 0 && !doorBeaconId && (
-                  <option value="">ビーコンを選択してください</option>
-                )}
-                {selectedBeacons.map(id => (
-                  <option key={id} value={id}>
-                    {getBeaconDisplayName(id)}
-                  </option>
-                ))}
-              </select>
               <p style={{ marginTop: '8px', fontSize: '12px', color: '#7f8c8d' }}>
-                退室判定に使用するため、ドア付近に設置するビーコンを1台選択してください。
+                💡 <strong>推奨:</strong> 3つのビーコンのうち、1つはドア付近に設置することをお勧めします。これにより退室判定の精度が向上します。
               </p>
             </div>
             <button
               className="btn btn-primary"
               onClick={() => setStep(1)}
-              disabled={!roomName || selectedBeacons.length !== 3 || !doorBeaconId}
+              disabled={!roomName || selectedBeacons.length !== 3}
             >
               次へ
             </button>
@@ -1837,14 +1799,6 @@ export default function Calibration() {
             >
               キャンセル
             </button>
-            {isFurnitureEditMode && (
-              <button 
-                className="btn btn-outline"
-                onClick={() => navigate(`/edit-room/${roomId}`)}
-              >
-                ルーム編集に戻る
-              </button>
-            )}
           </div>
         </div>
 
@@ -1967,29 +1921,27 @@ export default function Calibration() {
             {/* 既存の家具リストの後に追加 */}
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>ビーコン位置</h3>
-              {selectedBeacons.length === 0 ? (
+              {currentBeacons.length === 0 ? (
                 <p style={{ color: '#7f8c8d', fontSize: '14px' }}>ビーコンが設定されていません</p>
               ) : (
                 <div>
-                  {selectedBeacons.map(beaconId => {
-                    const beacon = TEST_ROOM.beacons.find(b => b.id === beaconId);
-                    if (!beacon) return null;
-                    const position = beaconPositions[beaconId] || beacon.position;
+                  {currentBeacons.map(beacon => {
+                    const position = beaconPositions[beacon.id] || beacon.position;
                     return (
                       <div
-                        key={beaconId}
+                        key={beacon.id}
                         style={{
                           display: 'flex',
                           justifyContent: 'space-between',
                           alignItems: 'center',
                           padding: '8px',
                           marginBottom: '4px',
-                          backgroundColor: selectedBeacon === beaconId ? '#E3F2FD' : '#F8F9FA',
+                          backgroundColor: selectedBeacon === beacon.id ? '#E3F2FD' : '#F8F9FA',
                           borderRadius: '4px',
                           cursor: 'pointer',
-                          border: selectedBeacon === beaconId ? '2px solid #4A90E2' : '1px solid #E1E8ED'
+                          border: selectedBeacon === beacon.id ? '2px solid #4A90E2' : '1px solid #E1E8ED'
                         }}
-                        onClick={() => setSelectedBeacon(selectedBeacon === beaconId ? null : beaconId)}
+                        onClick={() => setSelectedBeacon(selectedBeacon === beacon.id ? null : beacon.id)}
                       >
                         <div style={{ fontSize: '14px' }}>
                           <strong>{beacon.name}</strong><br />
@@ -2000,7 +1952,7 @@ export default function Calibration() {
                         <div style={{ 
                           width: '16px', 
                           height: '16px', 
-                          backgroundColor: '#4A90E2', 
+                          backgroundColor: '#FF9800', 
                           borderRadius: '50%' 
                         }} />
                       </div>
@@ -2013,10 +1965,10 @@ export default function Calibration() {
             <div className="card">
               <h3 style={{ marginBottom: '12px' }}>操作方法</h3>
               <ul style={{ fontSize: '14px', lineHeight: '1.6', paddingLeft: '16px' }}>
-                <li>家具またはビーコン（青い円）をクリックして選択</li>
-                <li>選択したオブジェクトをドラッグで移動</li>
-                <li>選択した家具の角（赤い四角）をドラッグでサイズ変更</li>
-                <li>ビーコンはドラッグ移動のみ可能</li>
+                <li>家具またはビーコン（オレンジの円）をドラッグで移動</li>
+                <li>家具を一度クリックして選択すると角に赤い四角が表示されます</li>
+                <li>赤い四角をドラッグすると家具のサイズ変更ができます</li>
+                <li>ビーコンはサイズ変更できません</li>
                 <li>グリッド1マス = 0.1単位（正規化座標）</li>
               </ul>
             </div>
@@ -2038,7 +1990,6 @@ export default function Calibration() {
                 borderRadius: '8px',
                 cursor: isDragging ? 'grabbing' : selectedFurniture ? 'move' : 'pointer'
               }}
-              onClick={handleCanvasClick}
               onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
