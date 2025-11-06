@@ -459,8 +459,8 @@ export default function Dashboard() {
       return { status: '不明', color: '#856404', bgColor: '#fff3cd' };
     }
     
-    const hasFallen = device.statusData.motion === true;
-    if (hasFallen) {
+    const hasShock = device.statusData.shock === true;
+    if (hasShock) {
       return { status: '転倒', color: '#721c24', bgColor: '#f8d7da' };
     } else {
       return { status: '正常', color: '#155724', bgColor: '#d4edda' };
@@ -661,16 +661,6 @@ export default function Dashboard() {
           maxWidth: '1400px', 
           margin: '0 auto'
         }}>
-          <h1 style={{ 
-            marginBottom: '24px', 
-            color: '#333',
-            textAlign: 'center',
-            fontSize: '28px',
-            fontWeight: 'bold'
-          }}>
-            mimoca トラッカー管理ダッシュボード
-          </h1>
-
           <ModeSelector
             currentMode={currentMode}
             onModeChange={handleModeChange}

@@ -89,10 +89,15 @@ def _to_iso_jst(epoch_sec: int) -> str:
 
 def _build_status(decoded: dict, ts_iso: str) -> dict:
     """ステータス用のドキュメントを作成"""
+    # event_status の bit 0 を shock フラグとして抽出
+    event_status = decoded.get("event_status", 0)
+    shock = bool(event_status & 0x01) if event_status else False
+    
     return {
         "temperature_c": decoded.get("temperature_c"),
         "battery_pct": decoded.get("battery_pct"),
         "light_pct": decoded.get("light_pct"),
+        "shock": shock,
         "updatedAt": ts_iso,
         "updatedAtServer": _server_ts(),
     }

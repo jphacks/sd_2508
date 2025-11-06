@@ -41,7 +41,7 @@ export interface Device {
 // DeviceStatusをDeviceStatusDataにリネーム（重複回避）
 export interface DeviceStatusData {
   inside?: boolean;           // 室内状態 (true: 室内, false: 室外)
-  motion?: boolean;           // 転倒状態 (true: 転倒, false: 正常)
+  shock?: boolean;            // 転倒状態 (true: 転倒, false: 正常)
   temperature_c?: number;     // 温度 (摂氏)
   inBus?: boolean;            // バス内状態 (true: バス内, false: バス外)
   busStatusUpdatedAt?: string; // バス状態の最終更新時刻

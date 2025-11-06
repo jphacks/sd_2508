@@ -227,7 +227,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
   // ステータス処理（転倒検知など）
   const processStatusData = useCallback((device: Device) => {
-    if (device.statusData?.motion === true) {
+    if (device.statusData?.shock === true) {
       const alertId = `shock-${device.devEUI}`;
       const alert: Alert = {
         id: alertId,

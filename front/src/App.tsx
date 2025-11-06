@@ -132,7 +132,7 @@ function NavBar({ onLogout }: { onLogout: () => void }) {
   return (
     <nav className="nav">
       <Link to="/" className={`nav-link ${isActive('/') ? 'active' : ''}`}>
-        ホーム
+        ダッシュボード
       </Link>
       <Link to="/management" className={`nav-link ${isActive('/management') ? 'active' : ''}`}>
         デバイス管理
