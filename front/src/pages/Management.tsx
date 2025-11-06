@@ -127,7 +127,7 @@ export default function Management() {
   };
 
   const startEditBeacon = (beacon: Beacon) => {
-    setEditingBeaconId(beacon.beaconId);
+    setEditingBeaconId(beacon.id);
     const initialValue = (beacon.rssiAt1m ?? -59).toString();
     setEditRssiAt1m(initialValue);
   };
@@ -471,7 +471,7 @@ export default function Management() {
                                 <button
                                   className="btn btn-danger"
                                   style={{ padding: '6px 12px', fontSize: '14px' }}
-                                  onClick={() => handleDeleteBeacon(beacon.beaconId)}
+                                  onClick={() => handleDeleteBeacon(beacon.id)}
                                 >
                                   削除
                                 </button>

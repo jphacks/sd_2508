@@ -13,13 +13,10 @@ export type FurnitureType = keyof typeof FURNITURE_TYPES;
 
 /**
  * RSSI値から距離を推定（対数距離減衰モデル）
- * @param rssi 受信信号強度
- * @param referenceRssi RSSI@1mの参照値（通常-59dBm）
- * @param n 環境係数（2-4、室内は通常3程度）
  */
 export function rssiToDistance(rssi: number, referenceRssi: number = -59, n: number = 3): number {
   if (rssi === 0) {
-    return -1; // 無効な値
+    return -1;
   }
   const ratio = (referenceRssi - rssi) / (10 * n);
   return Math.pow(10, ratio);
@@ -38,8 +35,18 @@ export function estimatePositionByFingerprinting(
   }
 
   const normalizeMac = (mac: string) => mac.toUpperCase().replace(/:/g, '');
+<<<<<<< HEAD
   const MISSING_SIGNAL_LEVEL = -100; // 未検出ビーコンの補完値
   const SIMILARITY_DECAY = 0.15; // 類似度計算時の距離スケール調整係数
+=======
+  const MISSING_SIGNAL_LEVEL = -100;
+  const SIMILARITY_DECAY = 0.15;
+
+  console.log('Fingerprinting開始:', {
+    currentRssiKeys: Object.keys(currentRssi),
+    calibrationPointsCount: calibrationPoints.length
+  });
+>>>>>>> taichi
 
   // 現在のRSSIを正規化済みのキーへ揃える
   const normalizedCurrent: { [beaconMac: string]: number } = {};
@@ -50,6 +57,11 @@ export function estimatePositionByFingerprinting(
     normalizedCurrent[normalizeMac(mac)] = value;
   });
 
+<<<<<<< HEAD
+=======
+  console.log('🔍 正規化された現在RSSI:', normalizedCurrent);
+
+>>>>>>> taichi
   const beaconSet = new Set<string>();
   Object.keys(normalizedCurrent).forEach(mac => beaconSet.add(mac));
 
@@ -58,6 +70,7 @@ export function estimatePositionByFingerprinting(
     .map(point => {
       const aggregates = new Map<string, { sum: number; count: number }>();
 
+<<<<<<< HEAD
       point.measurements.forEach(measurement => {
         if (!measurement?.rssiValues) {
           return;
@@ -85,21 +98,76 @@ export function estimatePositionByFingerprinting(
         beaconSet.add(mac);
       });
 
+=======
+      console.log(`🔍 CalibrationPoint処理: ${point.label}`, {
+        measurementsCount: point.measurements?.length || 0,
+        position: point.position
+      });
+
+      if (!point.measurements || point.measurements.length === 0) {
+        console.warn(`⚠️ ${point.label}: 測定データがありません`);
+        return null;
+      }
+
+      point.measurements.forEach(measurement => {
+        if (!measurement?.rssiValues) {
+          return;
+        }
+
+        Object.entries(measurement.rssiValues).forEach(([mac, value]) => {
+          if (typeof value !== 'number' || Number.isNaN(value)) {
+            return;
+          }
+          const normalizedMac = normalizeMac(mac);
+          const stats = aggregates.get(normalizedMac) || { sum: 0, count: 0 };
+          stats.sum += value;
+          stats.count += 1;
+          aggregates.set(normalizedMac, stats);
+          beaconSet.add(normalizedMac);
+        });
+      });
+
+      if (aggregates.size === 0) {
+        console.warn(`⚠️ ${point.label}: 有効なRSSIデータがありません`);
+        return null;
+      }
+
+      const averagedRssi: { [mac: string]: number } = {};
+      aggregates.forEach((stats, mac) => {
+        averagedRssi[mac] = stats.sum / Math.max(stats.count, 1);
+      });
+
+      console.log(`✅ ${point.label}: 平均RSSI`, averagedRssi);
+>>>>>>> taichi
       return { point, averagedRssi };
     })
     .filter((item): item is { point: CalibrationPoint; averagedRssi: { [mac: string]: number } } => item !== null);
 
   if (processedPoints.length === 0) {
+<<<<<<< HEAD
+=======
+    console.warn('⚠️ 有効なCalibrationPointsがありません');
+>>>>>>> taichi
     return null;
   }
 
   const beaconKeys = Array.from(beaconSet);
   if (beaconKeys.length === 0) {
+<<<<<<< HEAD
     return null;
   }
 
   // 類似度の計算
   // 各キャリブレーションポイントとの類似度を計算（ユークリッド距離の逆数）
+=======
+    console.warn('⚠️ 共通ビーコンがありません');
+    return null;
+  }
+
+  console.log('🔍 使用可能ビーコン:', beaconKeys);
+
+  // 類似度の計算
+>>>>>>> taichi
   const similarities = processedPoints.map(({ point, averagedRssi }) => {
     let sumSquaredDiff = 0;
     const featureCount = beaconKeys.length;
@@ -115,17 +183,34 @@ export function estimatePositionByFingerprinting(
       return { point, similarity: 0 };
     }
 
+<<<<<<< HEAD
     // 平均二乗誤差 (RMS) を距離とする
     const euclideanDistance = Math.sqrt(sumSquaredDiff / featureCount);
 
     // 距離を指数関数で類似度に変換（スケール調整済み）
     const similarity = Math.exp(-SIMILARITY_DECAY * euclideanDistance);
 
+=======
+    const euclideanDistance = Math.sqrt(sumSquaredDiff / featureCount);
+    const similarity = Math.exp(-SIMILARITY_DECAY * euclideanDistance);
+
+    console.log(`🔍 ${point.label}: 類似度計算`, {
+      euclideanDistance: euclideanDistance.toFixed(2),
+      similarity: similarity.toFixed(4)
+    });
+
+>>>>>>> taichi
     return { point, similarity };
   });
 
   // 類似度でソート
   similarities.sort((a, b) => b.similarity - a.similarity);
+
+  console.log('🔍 類似度順位:', similarities.map(s => ({
+    label: s.point.label,
+    similarity: s.similarity.toFixed(4),
+    position: s.point.position
+  })));
 
   // 上位3つの点で重み付け平均（k-NN法、k=3）
   const k = Math.min(3, similarities.length);
@@ -141,14 +226,18 @@ export function estimatePositionByFingerprinting(
   }
 
   if (totalWeight === 0) {
+    console.warn('⚠️ 総重みが0です');
     return null;
   }
 
-  return {
+  const result = {
     x: weightedX / totalWeight,
     y: weightedY / totalWeight,
-    confidence: similarities[0].similarity // 最も類似したポイントの類似度を信頼度とする
+    confidence: similarities[0].similarity
   };
+
+  console.log('✅ Fingerprinting結果:', result);
+  return result;
 }
 
 /**
@@ -341,7 +430,6 @@ export function smoothRSSI(values: number[], windowSize: number = 3): number {
 
 /**
  * ハイブリッド位置推定（Fingerprinting法のみ使用）
- * 指紋法によるキャリブレーションデータベースの位置推定
  */
 export function estimatePositionHybrid(
   currentRssi: { [beaconId: string]: number },
@@ -350,13 +438,26 @@ export function estimatePositionHybrid(
   referenceRssi: number = -59
 ): { x: number; y: number; confidence: number; method: string } | null {
   
-  // Fingerprinting法で推定
+  console.log('🧮 ハイブリッド位置推定開始:', {
+    currentRssiKeys: Object.keys(currentRssi),
+    calibrationPointsCount: calibrationPoints.length
+  });
+
+  // 🔥 重要: beaconIdをMACアドレスに変換
+  const macBasedRssi: { [mac: string]: number } = {};
+  
+  Object.entries(currentRssi).forEach(([beaconId, rssi]) => {
+    // beaconIdからMACアドレスを取得する必要がある
+    // これはMode1Indoorで適切に変換されているか確認が必要
+    console.log(`🔍 RSSI変換: ${beaconId} -> RSSI: ${rssi}`);
+    macBasedRssi[beaconId] = rssi; // 一時的にbeaconIdをそのまま使用
+  });
+
   const fingerprintResult = estimatePositionByFingerprinting(
-    currentRssi, 
+    macBasedRssi, 
     calibrationPoints
   );
   
-  // Fingerprintingの結果を返す
   if (fingerprintResult) {
     return { 
       ...fingerprintResult, 
@@ -364,5 +465,6 @@ export function estimatePositionHybrid(
     };
   }
   
+  console.warn('⚠️ Fingerprinting推定失敗');
   return null;
 }

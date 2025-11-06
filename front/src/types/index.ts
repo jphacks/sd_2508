@@ -1,35 +1,128 @@
-// デバイス（トラッカー）関連の型定義
+// 統合型定義ファイル（重複を削除し、統合）
+
+// === 基本型定義 ===
+export type Mode = 'indoor' | 'bus' | 'gps';
+export type AppMode = "mode1" | "mode2" | "mode3";
+export type LoadingState = 'idle' | 'loading' | 'success' | 'error';
+
+// === デバイス関連（統合版） ===
 export interface Device {
-  deviceId: string; // トラッカーにつけた名前（識別用）
-  devEUI: string; // LoRaWAN デバイスEUI（必須）
+  // 必須フィールド（最小限）
+  id: string;
+  devEUI: string;
+  
+  // オプショナルフィールド（大部分を任意に）
+  deviceId: string;
+  name?: string;
+  userName?: string;
+  model?: string;
+  firmware?: string;
+  ownerUid?: string;
+  status?: "active" | "inactive";
+  tags?: string[];
+  
+  // LoRaWAN関連（任意）
   lorawan?: {
     joinEUI?: string;
     appEUI?: string;
   };
-  model: string;
-  firmware?: string;
-  ownerUid: string;
-  status: "active" | "inactive";
-  tags?: string[];
-  userName?: string; // トラッカー所持者のユーザー名
+  
+  // リアルタイムデータ（任意）
+  bleData?: BLEData[];
+  position?: GPSPosition | null;
+  lastUpdate?: Date;
+  statusData?: DeviceStatusData | null;
+  
+  // その他（任意）
+  mac?: string;
+  [key: string]: any; // 拡張性のため
 }
 
-// ビーコン関連の型定義
+// DeviceStatusをDeviceStatusDataにリネーム（重複回避）
+export interface DeviceStatusData {
+  inside?: boolean;           // 室内状態 (true: 室内, false: 室外)
+  motion?: boolean;           // 転倒状態 (true: 転倒, false: 正常)
+  temperature_c?: number;     // 温度 (摂氏)
+  inBus?: boolean;            // バス内状態 (true: バス内, false: バス外)
+  busStatusUpdatedAt?: string; // バス状態の最終更新時刻
+  [key: string]: any;         // その他のstatusフィールドに対応
+}
+
+// BLEData型を統合（BeaconDataと統合）
+export interface BLEData {
+  beaconId?: string;
+  mac: string;
+  rssi: number;
+  timestamp: string;
+  distance?: number;
+  txPower?: number;
+}
+
+// BeaconData型をBLEDataのエイリアスに
+export type BeaconData = BLEData;
+
+export interface GPSPosition {
+  lat: number;
+  lng?: number;
+  lon: number;
+  timestamp?: string;
+  accuracy?: number;
+  altitude?: number;
+  speed?: number;
+}
+
+// === ビーコン関連 ===
 export interface Beacon {
-  beaconId: string;
+  beaconId?: string;
+  id: string;
+  name?: string;
   mac: string;
   uuid?: string;
   major?: number;
   minor?: number;
-  type: "ibeacon" | "eddystone" | "raw";
+  type?: "ibeacon" | "eddystone" | "raw";
   rssiAt1m?: number;
   place?: { x: number; y: number };
   anchor_loc?: { lat: number; lon: number };
   tags?: string[];
-  name?: string;
 }
 
-// GPS測位データ
+export interface BeaconDevice {
+  id: string;
+  name: string;
+  mac: string;
+  rssi?: number;
+  lastSeen?: string;
+  battery?: number;
+  isActive?: boolean;
+}
+
+// === アラート関連 ===
+export type AlertType = 'shock' | 'exit_room' | 'bus_alone' | 'gps_distance';
+export type AlertSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface Alert {
+  id: string;
+  type: AlertType;
+  message: string;
+  deviceId: string;
+  deviceName?: string;
+  timestamp: string;
+  dismissed: boolean;
+  severity?: AlertSeverity;
+  mode: Mode;
+  additionalData?: Record<string, any>;
+}
+
+// === モード関連 ===
+export interface ModeConfig {
+  title: string;
+  description: string;
+  color: string;
+  icon: string;
+}
+
+// === GPS関連 ===
 export interface GPSFix {
   ts: string;
   loc: { lat: number; lon: number; alt?: number };
@@ -38,7 +131,6 @@ export interface GPSFix {
   speed_mps?: number;
 }
 
-// BLEスキャンデータ
 export interface BLEScan {
   ts: string;
   scan_ms?: number;
@@ -55,11 +147,10 @@ export interface BLEScan {
   loc_hint?: { lat: number; lon: number };
 }
 
-// 位置融合データ
 export interface FusedPosition {
   ts: { _seconds: number };
   loc?: { lat: number; lon: number; floor?: number };
-  xy?: { x: number; y: number }; // 0-1の正規化座標
+  xy?: { x: number; y: number };
   cov_xy?: number[][];
   uncertainty_ellipse?: {
     semi_major: number;
@@ -75,72 +166,99 @@ export interface FusedPosition {
   };
 }
 
-// 部屋のプロファイル（機能1用）
+// === 室内マップ関連 ===
 export interface RoomProfile {
   roomId: string;
   name: string;
-  beacons: string[]; // beaconIdの配列
+  beacons: string[];
   doorBeaconId?: string | null;
   calibrationPoints: CalibrationPoint[];
-  outline?: { width: number; height: number }; // メートル単位（未指定の場合は正規化座標）
+  outline?: { width: number; height: number };
   furniture?: FurnitureItem[];
   beaconPositions?: Array<{
     id: string;
     name: string;
-    position: { x: number; y: number }; // 0-1の正規化座標
+    position: { x: number; y: number };
   }>;
   createdAt: string;
   updatedAt: string;
 }
 
-// キャリブレーションポイント
 export interface CalibrationPoint {
   id: string;
-  position: { x: number; y: number }; // 部屋内の実座標（メートル）
-  label: string; // "左上隅", "中央", "ドア内側" など
+  label: string;
+  position: { x: number; y: number };
+  mac?: string;
+  beaconId?: string;
   measurements: Array<{
-    deviceId: string;
     timestamp: string;
-    rssiValues: { [beaconMac: string]: number };
+    rssiValues: { [mac: string]: number };
   }>;
 }
 
-// 家具アイテム
 export type FurnitureType = "desk" | "tv" | "piano" | "chair";
 
 export interface FurnitureItem {
   id: string;
-  type: FurnitureType; // string から FurnitureType に変更
+  type: FurnitureType;
   position: { x: number; y: number };
   width: number;
   height: number;
 }
 
-// アプリケーションモード
-export type AppMode = "mode1" | "mode2" | "mode3";
+export interface BeaconPosition {
+  id: string;
+  name: string;
+  x: number; // マップ上のX座標 (0-100%)
+  y: number; // マップ上のY座標 (0-100%)
+  mac: string;
+  range?: number; // 検知範囲（メートル）
+}
 
-// 機能1の設定
+export interface RoomLayout {
+  id: string;
+  name: string;
+  width: number; // 実際の幅（メートル）
+  height: number; // 実際の高さ（メートル）
+  beacons: BeaconPosition[];
+  obstacles?: Array<{ // 障害物（壁、家具など）
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    type: 'wall' | 'furniture' | 'door';
+    label?: string;
+  }>;
+  zones?: Array<{ // エリア定義
+    id: string;
+    name: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    color: string;
+  }>;
+}
+
+// === 設定関連 ===
 export interface Mode1Config {
   roomId: string;
   alertOnExit: boolean;
   calibrated: boolean;
 }
 
-// 機能2の設定
 export interface Mode2Config {
   beaconId: string;
-  alertThresholdMinutes: number; // デフォルト3分
+  alertThresholdMinutes: number;
   calibrated: boolean;
 }
 
-// 機能3の設定
 export interface Mode3Config {
-  parentTrackerIds: string[]; // 親トラッカーのdeviceId配列
-  maxDistanceMeters: number; // デフォルト30m
+  parentTrackerIds: string[];
+  maxDistanceMeters: number;
   calibrated: boolean;
 }
 
-// アプリケーション設定
 export interface AppConfig {
   currentMode: AppMode;
   mode1?: Mode1Config;
@@ -149,13 +267,53 @@ export interface AppConfig {
   userId: string;
 }
 
-// アラート情報
-export interface Alert {
+export interface TrackerGroup {
   id: string;
-  type: "exit_room" | "bus_left_behind" | "separated" | "shock";
-  message: string;
-  deviceId?: string;
-  deviceName?: string;
+  name: string;
+  parentDeviceId: string;
+  childDeviceIds: string[];
+  settings: {
+    maxDistance: number;
+    alertEnabled: boolean;
+    trackingInterval: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+// === API関連 ===
+export interface APIResponse<T> {
+  success: boolean;
+  data: T;
+  error?: string;
   timestamp: string;
-  dismissed: boolean;
+}
+
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+// Mode2Bus用の設定ハンドラー型を追加
+export interface Mode2BusSettings {
+  selectedBeacon: string;
+  rssiThreshold: number;
+  alertThreshold: number;
+  alertEnabled: boolean;
+  alertSound: boolean;
+  connectionTimeout: number;
+  showAllDevices: boolean;
+}
+
+export interface Mode2BusSettingsHandlers {
+  onSelectedBeaconChange?: (beaconId: string) => void;
+  onRssiThresholdChange?: (threshold: number) => void;
+  onAlertThresholdChange?: (threshold: number) => void;
+  onAlertEnabledChange?: (enabled: boolean) => void;
+  onAlertSoundChange?: (enabled: boolean) => void;
+  onConnectionTimeoutChange?: (timeout: number) => void;
+  onShowAllDevicesChange?: (show: boolean) => void;
 }

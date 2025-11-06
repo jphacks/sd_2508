@@ -3,7 +3,7 @@ import { ref, onValue, update } from "firebase/database";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
-import { Device, BLEScan, RoomProfile, Alert, Beacon } from "../types";
+import { Device, BLEScan, RoomProfile, Alert, Beacon, CalibrationPoint } from "../types";
 import { estimatePositionHybrid } from "../utils/positioning";
 
 // ビーコン受信ログの型定義
@@ -41,12 +41,18 @@ const FURNITURE_TYPES = {
 
 const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30分
 
-export default function Mode1Indoor() {
+// RTDB監視を削除し、外部データのみに依存
+export default function Mode1Indoor({ devices: externalDevices }: { devices?: Device[] } = {}) {
   const location = useLocation();
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [devices, setDevices] = useState<Device[]>(externalDevices || []);
   const [beacons, setBeacons] = useState<(Beacon & { firestoreId: string })[]>([]);
   const beaconsRef = useRef<(Beacon & { firestoreId: string })[]>([]);
   const [roomProfile, setRoomProfile] = useState<RoomProfile | null>(null);
+  
+  // 🔥 不足している状態管理を追加
+  const [availableRooms, setAvailableRooms] = useState<RoomProfile[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  
   const [devicePositions, setDevicePositions] = useState<
     Map<string, { x: number; y: number }>
   >(new Map());
@@ -74,6 +80,16 @@ export default function Mode1Indoor() {
     top: number;
     signals: BeaconSignal[];
   } | null>(null);
+
+  // 🔥 デフォルトルーム選択のuseEffectを追加
+  useEffect(() => {
+    if (availableRooms.length > 0 && !roomProfile) {
+      // 最初の部屋をデフォルトで選択
+      setRoomProfile(availableRooms[0]);
+      console.log('デフォルト部屋を選択:', availableRooms[0].name);
+    }
+  }, [availableRooms, roomProfile]);
+  
   useEffect(() => {
     beaconsRef.current = beacons;
   }, [beacons]);
@@ -138,410 +154,385 @@ export default function Mode1Indoor() {
     setShowRssiOverlay(params.has("rssi"));
   }, [location.search]);
 
+  // 🔥 loadData関数からRTDB監視を完全削除
+  const [isInitialized, setIsInitialized] = useState(false);
+
   const loadData = async () => {
     try {
-      cleanupRtdbListeners();
-      // TODO: 実際のユーザーIDを使用
-      const userId = "demo-user";
+      setLoading(true);
+      
+      const [beaconsSnapshot, roomsSnapshot, configSnapshot] = await Promise.all([
+        getDocs(collection(db, 'beacons')),
+        getDocs(collection(db, 'rooms')),
+        getDocs(collection(db, 'appConfig')) // 🔥 追加: ユーザー設定を取得
+      ]);
 
-      // デバイス一覧を取得
-      const devicesSnapshot = await getDocs(collection(db, "devices"));
-      const devicesData = devicesSnapshot.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          } as Device & { id: string })
-      );
-      setDevices(devicesData);
-
-      // アクティブな部屋プロファイルを取得
-      const configSnapshot = await getDocs(collection(db, "appConfig"));
-      const userConfig = configSnapshot.docs.find(
-        (d) => d.data().userId === userId
-      );
-
-      let activeRoomId: string | null = null;
-      if (userConfig && userConfig.data().mode1?.roomId) {
-        activeRoomId = userConfig.data().mode1.roomId;
-      }
-
-      if (!activeRoomId) {
-        // アクティブなルームが設定されていない場合、最新のルームを使用
-        const roomsSnapshot = await getDocs(collection(db, "rooms"));
-        if (roomsSnapshot.docs.length > 0) {
-          const latestRoom = roomsSnapshot.docs.sort((a, b) => {
-            const aTime = new Date(a.data().createdAt).getTime();
-            const bTime = new Date(b.data().createdAt).getTime();
-            return bTime - aTime;
-          })[0];
-          activeRoomId = latestRoom.id;
-        }
-      }
-
+      const beaconsData = beaconsSnapshot.docs.map(doc => ({
+        firestoreId: doc.id,
+        ...doc.data()
+      })) as (Beacon & { firestoreId: string })[];
+      
+      setBeacons(beaconsData);
+      beaconsRef.current = beaconsData;
+      
+      const roomProfiles = roomsSnapshot.docs.map(doc => ({
+        roomId: doc.id,
+        ...doc.data()
+      })) as RoomProfile[];
+      
+      setAvailableRooms(roomProfiles);
+      
+      // 🔥 アクティブルーム検索
+      const userId = 'demo-user'; // TODO: 実際のユーザーIDを使用
+      const userConfig = configSnapshot.docs.find(doc => doc.data().userId === userId);
+      const activeRoomId = userConfig?.data()?.mode1?.roomId;
+      
+      let selectedRoom: RoomProfile | null = null;
+      
       if (activeRoomId) {
-        const roomDoc = await getDoc(doc(db, "rooms", activeRoomId));
-        if (roomDoc.exists()) {
-          const roomData = {
-            roomId: roomDoc.id,
-            ...roomDoc.data(),
-          } as RoomProfile;
-          setRoomProfile(roomData);
-
-          // ビーコン情報を取得（三辺測量用）
-          const beaconsSnapshot = await getDocs(collection(db, "beacons"));
-          const beaconsData = beaconsSnapshot.docs.map(
-            (doc) =>
-              ({
-                firestoreId: doc.id,
-                ...doc.data(),
-              } as Beacon & { firestoreId: string })
-          );
-          setBeacons(beaconsData);
-
-          // ルームで使用するビーコンの位置情報を構築
-          const beaconPositions = roomData.beacons
-            .map((beaconId) => {
-              const beacon = beaconsData.find(
-                (b) => b.firestoreId === beaconId
-              );
-              if (beacon && beacon.place) {
-                return {
-                  x: beacon.place.x,
-                  y: beacon.place.y,
-                  mac: beacon.mac,
-                  beaconId: beaconId,
-                };
-              }
-              return null;
-            })
-            .filter((b) => b !== null) as Array<{
-            x: number;
-            y: number;
-            mac: string;
-            beaconId: string;
-          }>;
-
-          // 各デバイスのBLEスキャンデータを監視
-          devicesData.forEach((device) => {
-            // デバイスIDを小文字に正規化（RTDBと一致させる）
-            const normalizedDeviceId = device.devEUI.toLowerCase();
-            if (!normalizedDeviceId) return;
-
-            const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
-
-            console.log(`📍 Mode1: ${device.deviceId}の監視開始`, {
-              devEUI: device.devEUI,
-              normalized: normalizedDeviceId,
-            });
-
-            const unsubscribe = onValue(trackerRef, (snapshot) => {
-              const data = snapshot.val();
-              const alertId = `shock-${normalizedDeviceId}`;
-              const shock = data?.status?.shock;
-
-              console.log("shock debug:", {
-                devEUI: normalizedDeviceId,
-                raw: shock,
-                type: typeof shock,
-              });
-
-              if (shock) {
-                const alert: Alert = {
-                  id: alertId,
-                  type: "shock",
-                  message: `${
-                    device.userName || device.deviceId
-                  } に衝撃を検知！`,
-                  deviceId: device.devEUI,
-                  deviceName: device.userName,
-                  timestamp: new Date().toISOString(),
-                  dismissed: false,
-                };
-                setAlerts((prev) =>
-                  prev.some((a) => a.id === alertId) ? prev : [...prev, alert]
-                );
-                audioRef.current?.play().catch(() => {});
-              } else {
-                setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-              }
-
-              if (data && data.beacons && roomData) {
-                console.log(`📡 ${device.deviceId}のRTDB更新:`, {
-                  timestamp: data.beaconsUpdatedAt,
-                  beaconsCount: data.beacons.length,
-                });
-
-                // タイムスタンプを保存
-                if (data.beaconsUpdatedAt) {
-                  setDeviceTimestamps((prev) => {
-                    const newMap = new Map(prev);
-                    newMap.set(device.devEUI, data.beaconsUpdatedAt);
-                    return newMap;
-                  });
-                }
-
-                // 各ビーコンからRSSI値を取得（無効な信号をフィルタリング）
-                const rssiMap: { [beaconId: string]: number } = {};
-                const receivedBeacons: Array<{
-                  beaconId: string;
-                  beaconName: string;
-                  mac: string;
-                  rssi: number;
-                }> = [];
-                const missingBeacons: Array<{
-                  beaconId: string;
-                  beaconName: string;
-                  mac: string;
-                }> = [];
-
-                // ルームで使用するビーコンのリストを取得
-                const expectedBeacons = roomData.beacons
-                  .map((beaconId) => {
-                    const beacon = beaconsRef.current.find(
-                      (b) => b.firestoreId === beaconId
-                    );
-                    if (beacon) {
-                      return {
-                        beaconId: beacon.beaconId || beacon.firestoreId, // FirestoreのbeaconIdフィールドを使用
-                        beaconName: beacon.name || beacon.beaconId,
-                        mac: beacon.mac.toUpperCase().replace(/:/g, ""),
-                      };
-                    }
-                    return null;
-                  })
-                  .filter((b) => b !== null) as Array<{
-                  beaconId: string;
-                  beaconName: string;
-                  mac: string;
-                }>;
-
-                const expectedBeaconByMac = new Map(
-                  expectedBeacons.map((beacon) => [beacon.mac, beacon])
-                );
-                const beaconSignals: BeaconSignal[] = [];
-
-                data.beacons.forEach((beacon: any) => {
-                  if (beacon.mac && beacon.rssi) {
-                    // MACアドレスを正規化（コロン区切りを大文字に統一）
-                    const normalizedMac = beacon.mac
-                      .toUpperCase()
-                      .replace(/:/g, "");
-
-                    // 無効な信号をフィルタリング（MAC: ff:ff:ff:ff:ff:ff, RSSI: -1）
-                    const isInvalidSignal =
-                      normalizedMac === "FFFFFFFFFFFF" || beacon.rssi === -1;
-
-                    if (!isInvalidSignal) {
-                      rssiMap[normalizedMac] = beacon.rssi;
-
-                      // 受信したビーコンをログに記録
-                      const beaconInfo = expectedBeacons.find(
-                        (b) => b.mac === normalizedMac
-                      );
-                      if (beaconInfo) {
-                        receivedBeacons.push({
-                          ...beaconInfo,
-                          rssi: beacon.rssi,
-                        });
-                      }
-
-                      const beaconInfoFromMap = getBeaconInfo(normalizedMac);
-                      const expectedInfo =
-                        expectedBeaconByMac.get(normalizedMac);
-                      const beaconId =
-                        beaconInfoFromMap?.beaconId?.trim() ||
-                        expectedInfo?.beaconId?.trim() ||
-                        normalizedMac;
-                      beaconSignals.push({
-                        beaconId,
-                        mac: normalizedMac,
-                        rssi: beacon.rssi,
-                      });
-                    }
-                  }
-                });
-
-                // 受信できなかったビーコンを特定
-                expectedBeacons.forEach((expectedBeacon) => {
-                  if (!rssiMap[expectedBeacon.mac]) {
-                    missingBeacons.push(expectedBeacon);
-                  }
-                });
-
-                // ログを記録（受信できなかったビーコンがある場合のみ）
-                if (missingBeacons.length > 0) {
-                  const logEntry: BeaconLog = {
-                    id: device.devEUI,
-                    timestamp: new Date().toISOString(),
-                    deviceId: device.devEUI,
-                    deviceName: device.userName || device.deviceId,
-                    missingBeacons,
-                    receivedBeacons,
-                  };
-
-                  setBeaconLogs((prev) => {
-                    const withoutCurrent = prev.filter(
-                      (log) => log.deviceId !== device.devEUI
-                    );
-                    const newLogs = [logEntry, ...withoutCurrent].slice(0, 100);
-                    return newLogs;
-                  });
-
-                  console.log(
-                    `⚠️ ${device.deviceId} ビーコン受信状況:`,
-                    {
-                      received: receivedBeacons.length,
-                      missing: missingBeacons.length,
-                      missingBeacons: missingBeacons.map((b) => b.beaconName),
-                    }
-                  );
-                }
-
-                console.log(`📊 ${device.deviceId}のRSSI値:`, rssiMap);
-
-                // RSSI閾値を上回っている場合、通常の位置推定を実行
-                const position = estimatePositionHybrid(
-                  rssiMap,
-                  roomData.calibrationPoints,
-                  beaconPositions.length >= 3 ? beaconPositions : undefined
-                );
-
-                if (position) {
-                  console.log(`📍 ${device.deviceId} 位置推定結果:`, {
-                    normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
-                    method: position.method,
-                    confidence: `${(position.confidence * 100).toFixed(1)}%`,
-                    rssiCount: Object.keys(rssiMap).length
-                  });
-
-                  const outlineWidth = roomData.outline?.width ?? 1;
-                  const outlineHeight = roomData.outline?.height ?? 1;
-                  const actualPosition = {
-                    x: position.x * outlineWidth,
-                    y: position.y * outlineHeight
-                  };
-                  console.log(`📍 ${device.deviceId} 実座標換算:`, {
-                    position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
-                    roomSize: { width: outlineWidth, height: outlineHeight }
-                  });
-
-                  const isInside = checkRoomExit(device, actualPosition, roomData, false);
-
-                  setDevicePositions((prev) => {
-                    const newMap = new Map(prev);
-                    if (isInside) {
-                      newMap.set(device.devEUI, actualPosition);
-                      return newMap;
-                    }
-
-                    const doorOutside = roomData.calibrationPoints.find(
-                      (p) => p.id === "door_outside"
-                    );
-                    const doorInside = roomData.calibrationPoints.find(
-                      (p) => p.id === "door_inside"
-                    );
-
-                    if (!doorOutside || !doorInside) {
-                      // ドア情報がない場合は推定位置のまま配置
-                      newMap.set(device.devEUI, actualPosition);
-                      return newMap;
-                    }
-
-                    const doorCenterX =
-                      (doorInside.position.x + doorOutside.position.x) / 2;
-                    const doorCenterY =
-                      (doorInside.position.y + doorOutside.position.y) / 2;
-
-                    const doorVectorX =
-                      doorOutside.position.x - doorInside.position.x;
-                    const doorVectorY =
-                      doorOutside.position.y - doorInside.position.y;
-                    const doorVectorLength = Math.sqrt(
-                      doorVectorX * doorVectorX + doorVectorY * doorVectorY
-                    );
-
-                    const normalizedVectorX =
-                      doorVectorLength !== 0 ? doorVectorX / doorVectorLength : 0;
-                    const normalizedVectorY =
-                      doorVectorLength !== 0 ? doorVectorY / doorVectorLength : 0;
-
-                    const doorCenterMeterX = doorCenterX * outlineWidth;
-                    const doorCenterMeterY = doorCenterY * outlineHeight;
-                    const exitSpaceDistance = 1.5;
-
-                    const prevWithoutCurrent = new Map(prev);
-                    prevWithoutCurrent.delete(device.devEUI);
-
-                    const margin = 0.5;
-                    const exitDevices = Array.from(prevWithoutCurrent.entries()).filter(
-                      ([, pos]) =>
-                        !(
-                          pos.x >= -margin &&
-                          pos.x <= outlineWidth + margin &&
-                          pos.y >= -margin &&
-                          pos.y <= outlineHeight + margin
-                        )
-                    );
-
-                    const deviceIndex = exitDevices.findIndex(
-                      ([devEUI]) => devEUI === device.devEUI
-                    );
-                    const actualIndex =
-                      deviceIndex >= 0 ? deviceIndex : exitDevices.length;
-
-                    const lateralOffset = (actualIndex % 5 - 2) * 0.3;
-                    const depthOffset = Math.floor(actualIndex / 5) * 0.3;
-
-                    const outsidePosition = {
-                      x:
-                        doorCenterMeterX +
-                        normalizedVectorX * (exitSpaceDistance + depthOffset) -
-                        normalizedVectorY * lateralOffset,
-                      y:
-                        doorCenterMeterY +
-                        normalizedVectorY * (exitSpaceDistance + depthOffset) +
-                        normalizedVectorX * lateralOffset,
-                    };
-
-                    console.log(`🚶 ${device.deviceId} 退室スペースへ配置:`, {
-                      outsidePosition,
-                      exitDevicesCount: exitDevices.length,
-                    });
-
-                    newMap.set(device.devEUI, outsidePosition);
-                    return newMap;
-                  });
-
-                  // デバッグ用にメソッド情報を表示（オプション）
-                  console.log(
-                    `${device.deviceId}: ${position.method} (信頼度: ${(
-                      position.confidence * 100
-                    ).toFixed(1)}%)`
-                  );
-                }
-
-                setDeviceBeaconSignals((prev) => {
-                  const newMap = new Map(prev);
-                  const sortedSignals = beaconSignals.sort((a, b) =>
-                    a.beaconId.localeCompare(b.beaconId, "ja")
-                  );
-                  newMap.set(device.devEUI, sortedSignals);
-                  return newMap;
-                });
-              }
-            });
-            rtdbUnsubscribesRef.current.push(unsubscribe);
-          });
-        }
+        // 使用中に設定されたルームを検索
+        selectedRoom = roomProfiles.find(room => room.roomId === activeRoomId) || null;
+        console.log('✅ アクティブルーム発見:', selectedRoom?.name);
       }
-
+      
+      if (!selectedRoom && roomProfiles.length > 0) {
+        // フォールバック: 最初のルームを使用
+        selectedRoom = roomProfiles[0];
+        console.log('⚠️ フォールバック: 最初のルーム使用:', selectedRoom.name);
+      }
+      
+      if (selectedRoom) {
+        setRoomProfile(selectedRoom);
+      }
+      
+      setIsInitialized(true);
       setLoading(false);
+      
+      console.log('✅ Mode1 初期化完了:', {
+        beacons: beaconsData.length,
+        rooms: roomProfiles.length,
+        activeRoom: selectedRoom?.name,
+        activeRoomId
+      });
+      
     } catch (error) {
-      console.error("データ読み込みエラー:", error);
+      console.error('❌ Mode1 データ読み込みエラー:', error);
+      setError('データの読み込みに失敗しました');
       setLoading(false);
     }
   };
+
+  
+
+
+  // ステータス処理（転倒検知など）
+  const processStatusData = useCallback((device: Device) => {
+    if (device.statusData?.motion === true) {
+      const alertId = `shock-${device.devEUI}`;
+      const alert: Alert = {
+        id: alertId,
+        type: "shock",
+        message: `${device.userName || device.deviceId} で衝撃を検知しました！`,
+        deviceId: device.devEUI,
+        deviceName: device.userName,
+        timestamp: new Date().toISOString(),
+        dismissed: false,
+        mode: 'indoor'
+      };
+
+      setAlerts((prev) => {
+        if (prev.some((a) => a.id === alertId)) return prev;
+        return [...prev, alert];
+      });
+
+      if (audioRef.current) audioRef.current.play();
+
+      setTimeout(() => {
+        setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      }, 10000);
+    }
+  }, []);
+
+  const performPositionEstimation = useCallback((device: Device, scan: BLEScan) => {
+    console.log(`🎯 Mode1 位置推定開始: ${device.name}`, {
+      scanTimestamp: scan.ts,
+      scanBeacons: scan.beacons.length,
+      roomProfile: roomProfile?.name
+    });
+
+    try {
+      if (!roomProfile?.calibrationPoints) {
+        console.warn(`⚠️ Mode1 CalibrationPointsが未設定: ${device.name}`);
+        return;
+      }
+
+      // ビーコン位置情報を構築
+      const beaconPositions = roomProfile.beacons
+        .map((beaconId) => {
+          const beacon = beaconsRef.current.find(b => b.firestoreId === beaconId);
+          if (beacon && beacon.place) {
+            return {
+              x: beacon.place.x,
+              y: beacon.place.y,
+              mac: beacon.mac,
+              beaconId: beaconId,
+            };
+          }
+          return null;
+        })
+        .filter((b) => b !== null) as Array<{
+          x: number;
+          y: number;
+          mac: string;
+          beaconId: string;
+        }>;
+
+      // MACアドレスベースのRSSIマップ作成
+      const rssiMap: { [mac: string]: number } = {};
+      
+      scan.beacons.forEach((beacon) => {
+        if (beacon.mac && beacon.rssi) {
+          const normalizedMac = beacon.mac.toUpperCase().replace(/:/g, "");
+          const isInvalidSignal = normalizedMac === "FFFFFFFFFFFF" || beacon.rssi === -1;
+          
+          if (!isInvalidSignal) {
+            rssiMap[normalizedMac] = beacon.rssi;
+            console.log(`📡 RSSI追加: ${normalizedMac} -> ${beacon.rssi}dBm`);
+          }
+        }
+      });
+
+      console.log(`📊 ${device.name}のRSSI値:`, rssiMap);
+
+      if (Object.keys(rssiMap).length === 0) {
+        console.warn(`⚠️ ${device.name}: 有効なRSSI値がありません`);
+        return;
+      }
+
+      // 位置推定実行
+      const position = estimatePositionHybrid(
+        rssiMap,
+        roomProfile.calibrationPoints,
+        beaconPositions.length >= 3 ? beaconPositions : undefined
+      );
+
+      if (position) {
+        console.log(`📍 ${device.name} 位置推定結果:`, {
+          normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
+          method: position.method,
+          confidence: `${(position.confidence * 100).toFixed(1)}%`,
+          rssiCount: Object.keys(rssiMap).length
+        });
+
+        // 座標変換
+        const outlineWidth = roomProfile.outline?.width ?? 1;
+        const outlineHeight = roomProfile.outline?.height ?? 1;
+        const actualPosition = {
+          x: position.x * outlineWidth,
+          y: position.y * outlineHeight
+        };
+
+        console.log(`📍 ${device.name} 実座標換算:`, {
+          position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
+          roomSize: { width: outlineWidth, height: outlineHeight }
+        });
+
+        // 🔧 位置情報を即座に更新
+        setDevicePositions(prev => {
+          const newMap = new Map(prev);
+          newMap.set(device.devEUI, actualPosition);
+          console.log(`🎯 位置更新: ${device.name}`, actualPosition);
+          return newMap;
+        });
+
+        checkRoomExit(device, actualPosition, roomProfile);
+
+        // 🔧 描画を強制実行
+        setTimeout(() => {
+          console.log(`🎨 ${device.name}: 描画強制実行`);
+          if (roomProfile && canvasRef.current) {
+            drawRoom();
+          }
+        }, 100);
+      } else {
+        console.warn(`⚠️ ${device.name}: 位置推定失敗`);
+      }
+    } catch (error) {
+      console.error(`❌ Mode1 位置推定エラー: ${device.name}`, error);
+    }
+  }, [roomProfile]);
+
+  // 🔥 Mode1専用のデータ処理関数
+  const processDeviceDataForMode1 = useCallback((device: Device) => {
+    console.log(`📊 Mode1 データ処理開始: ${device.userName || device.name}`, {
+      hasRoomProfile: !!roomProfile,
+      hasBeacons: beaconsRef.current.length > 0,
+      bleDataLength: device.bleData?.length || 0,
+      statusData: !!device.statusData,
+      lastUpdate: device.lastUpdate
+    });
+
+    // 🔥 必要な条件をチェック
+    if (!roomProfile) {
+      console.warn(`⚠️ Mode1 roomProfile未設定: ${device.name}`);
+      return;
+    }
+    
+    if (beaconsRef.current.length === 0) {
+      console.warn(`⚠️ Mode1 beacons未設定: ${device.name}`);
+      return;
+    }
+
+    // BLEデータがある場合の位置推定
+    if (device.bleData && device.bleData.length > 0) {
+      console.log(`📡 Mode1 BLE処理: ${device.name}`, {
+        bleCount: device.bleData.length,
+        bleData: device.bleData.map(ble => ({
+          mac: ble.mac,
+          rssi: ble.rssi,
+          beaconId: ble.beaconId
+        }))
+      });
+
+      // 🔥 BLEScanデータの構築（詳細ログ付き）
+      const latestScan: BLEScan = {
+        ts: device.lastUpdate?.toISOString() || new Date().toISOString(),
+        beacons: device.bleData.map(ble => {
+          console.log(`📡 BLEデータ変換: ${device.name}`, {
+            originalMac: ble.mac,
+            originalRssi: ble.rssi,
+            beaconId: ble.beaconId
+          });
+          return {
+            mac: ble.mac,
+            rssi: ble.rssi,
+            txPower: undefined
+          };
+        })
+      };
+
+      console.log(`📊 Mode1 BLEScan構築完了: ${device.name}`, {
+        timestamp: latestScan.ts,
+        beaconCount: latestScan.beacons.length,
+        beacons: latestScan.beacons
+      });
+
+      // 🔥 位置推定処理を実行
+      try {
+        performPositionEstimation(device, latestScan);
+      } catch (error) {
+        console.error(`❌ Mode1 位置推定エラー: ${device.name}`, error);
+      }
+
+      // ビーコンシグナル更新
+      const signals: BeaconSignal[] = device.bleData.map(ble => ({
+        beaconId: ble.beaconId || ble.mac,
+        mac: ble.mac,
+        rssi: ble.rssi
+      }));
+      
+      console.log(`📶 Mode1 シグナル更新: ${device.name}`, signals);
+      setDeviceBeaconSignals(prev => new Map(prev.set(device.devEUI, signals)));
+    } else {
+      console.warn(`⚠️ Mode1 BLEデータなし: ${device.name}`);
+    }
+
+    // ステータスデータがある場合の処理
+    if (device.statusData) {
+      console.log(`📊 Mode1 ステータス処理: ${device.name}`, device.statusData);
+      processStatusData(device);
+    }
+
+    // 最終更新時刻の更新
+    if (device.lastUpdate) {
+      const timestamp = device.lastUpdate.toISOString();
+      setDeviceTimestamps(prev => new Map(prev.set(device.devEUI, timestamp)));
+      console.log(`⏰ Mode1 タイムスタンプ更新: ${device.name}`, timestamp);
+    }
+  }, [roomProfile, processStatusData]);
+
+  // 🔥 外部データ処理を初期化完了後に実行
+  useEffect(() => {
+    if (!externalDevices || !isInitialized || !roomProfile) {
+      return;
+    }
+
+    console.log('📡 Mode1 外部データ変更検知:', {
+      deviceCount: externalDevices.length,
+      timestamp: new Date().toISOString()
+    });
+
+    // 🔧 デバイスごとのBLEデータ変更を詳細チェック
+    externalDevices.forEach((externalDevice, index) => {
+      const currentDevice = devices.find(d => d.devEUI === externalDevice.devEUI);
+      
+      // BLEデータの変更チェック
+      const hasBleChange = !currentDevice || 
+        JSON.stringify(currentDevice.bleData) !== JSON.stringify(externalDevice.bleData);
+      
+      // 最終更新時刻の変更チェック  
+      const hasTimeChange = !currentDevice ||
+        currentDevice.lastUpdate?.getTime() !== externalDevice.lastUpdate?.getTime();
+
+      if (hasBleChange || hasTimeChange) {
+        console.log(`🔄 Mode1 デバイス変更検知: ${externalDevice.name}`, {
+          index,
+          hasBleChange,
+          hasTimeChange,
+          currentBleCount: currentDevice?.bleData?.length || 0,
+          newBleCount: externalDevice.bleData?.length || 0,
+          currentUpdate: currentDevice?.lastUpdate?.toISOString(),
+          newUpdate: externalDevice.lastUpdate?.toISOString()
+        });
+
+        // 即座にデバイスデータを処理
+        processDeviceDataForMode1(externalDevice);
+      }
+    });
+
+    // デバイス配列を更新
+    setDevices(externalDevices);
+  }, [externalDevices, isInitialized, roomProfile, devices, processDeviceDataForMode1]);
+
+  // 🔥 CalibrationPoint変換のヘルパー関数
+  const convertBeaconsToCalibrationPoints = useCallback((
+    beaconIds: string[], 
+    beacons: (Beacon & { firestoreId: string })[]
+  ): CalibrationPoint[] => {
+    return beaconIds
+      .map((beaconId) => {
+        const beacon = beacons.find(b => b.firestoreId === beaconId);
+        if (beacon && beacon.place) {
+          const calibrationPoint: CalibrationPoint = {
+            id: beaconId,
+            label: beacon.name || beacon.beaconId || beaconId,
+            position: {
+              x: beacon.place.x,
+              y: beacon.place.y
+            },
+            measurements: [] // 空の配列で初期化
+          };
+          
+          console.log(`📍 CalibrationPoint変換: ${beaconId}`, {
+            id: calibrationPoint.id,
+            label: calibrationPoint.label,
+            position: calibrationPoint.position,
+            originalBeacon: {
+              firestoreId: beacon.firestoreId,
+              mac: beacon.mac,
+              name: beacon.name
+            }
+          });
+          
+          return calibrationPoint;
+        }
+        
+        console.warn(`⚠️ ビーコンが見つからない: ${beaconId}`);
+        return null;
+      })
+      .filter((point): point is CalibrationPoint => point !== null);
+  }, []);
+
 
   const checkRoomExit = (
     device: Device,
@@ -620,6 +611,7 @@ export default function Mode1Indoor() {
         deviceName: device.userName,
         timestamp: new Date().toISOString(),
         dismissed: false,
+        mode: 'indoor'
       };
 
       let shouldScheduleCleanup = false;
@@ -683,10 +675,38 @@ export default function Mode1Indoor() {
   };
 
   useEffect(() => {
+    console.log('🎨 描画トリガー - devicePositions変更:', {
+      roomProfile: !!roomProfile,
+      deviceCount: devices.length,
+      positionCount: devicePositions.size,
+      positions: Array.from(devicePositions.entries()).map(([devEUI, pos]) => ({
+        devEUI,
+        position: { x: pos.x.toFixed(2), y: pos.y.toFixed(2) }
+      }))
+    });
+
     if (roomProfile && canvasRef.current) {
-      drawRoom();
+      // 🔧 短い遅延で確実に描画
+      const timer = setTimeout(() => {
+        console.log('🎨 実際の描画実行');
+        drawRoom();
+      }, 50);
+
+      return () => clearTimeout(timer);
     }
-  }, [roomProfile, devicePositions, showRssiOverlay]);
+  }, [roomProfile, devicePositions, devices, showRssiOverlay]);
+
+  useEffect(() => {
+    if (roomProfile && devices.length > 0 && devicePositions.size > 0) {
+      console.log('🎨 デバイス変更による描画実行');
+      const timer = setTimeout(() => {
+        drawRoom();
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [devices]);
+
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1664,7 +1684,7 @@ export default function Mode1Indoor() {
       {/* アラート音 */}
       <audio
         ref={audioRef}
-        src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGmi78OScTgwOUKXh8bllHAU2jdXxxn0pBSl+zPLaizsKFFux6OyrWBgLTKXh8bxpIgU1gtDy04k3CBtmue7mnlENDlCn4fG2Yx0FNo3V8cV9KwUqfsvy2os6CxJbrefrqVYZCkyk4PG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Rrerlsl0dBTiO1/HGfSwHKn3L8tuKOwsTWbHn66hWGQpNpOHxvGknBjiCzfLYiDgIGWe47eWfTw8OUq3q5bJdHQU4jtfxxn0sByp9y/LbizsLE1mw5+uoVhkKTKTh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKs6eWyXRwGOI7X8cZ9LAcqfcvy24s7CxNZsOfrqFYZCkyk4fG8aScGOILN8tiIOAgZZ7jt5Z9PDw5SrOrlsl0cBjiO1/HGfSwHKn3L8tuKOwsTWbDn66hWGQpMo+HxvGknBjiCzfLYiDgIGWe47eWfTw8OUqvq5bJdHQU4jtfxxn0sByp9y/LbijsLE1mw5+uoVRkKTKPh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ9KwcqfMvy24o6CxNZr+frqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfSsHKnzL8tuKOgsTWa/n66hWGQpMouDxvGknBjiCzfLYiDkIGWe47eWfTw8OUqvq5bJdHAY4jtfxxnwrByp8y/LbijsLE1mw5+uoVhkKTKLg8bxpJwY4gs3y2Ig5CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ8KwcqfMvy24o6CxNZsOfrqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWbDn66hWGQpMouDxvGknBjiCzfLYiDkIGWe47eWfTw8OUqvq5bJdHAY4jtfxxnwrByp8y/LbijsLE1mw5+uoVhkKTKLg8bxpJwY4gs3y2Ig5CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ8KwcqfMvy24o6CxNZsOfrqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWbDn66hWGQpMouDxvGknBjiCzfLYiDkIGWe47eWfTw8OU="
+        src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGmi78OScTgwOUKXh8bllHAU2jdXxxn0pBSl+zPLaizsKFFux6OyrWBgLTKXh8bxpIgU1gtDy04k3CBtmue7mnlENDlCn4fG2Yx0FNo3V8cV9KwUqfsvy2os6CxJbrefrqVYZCkyk4PG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Rrerlsl0dBTiO1/HGfSwHKn3L8tuKOwsTWbHn66hWGQpNpOHxvGknBjiCzfLYiDgIGWe47eWfTw8OUq3q5bJdHQU4jtfxxn0sByp9y/LbizsLE1mw5+uoVhkKTKTh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKs6eWyXRwGOI7X8cZ9LAcqfcvy24s7CxNZsOfrqFYZCkyk4fG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfSwHKn3L8tuKOwsTWbDn66hWGQpMo+HxvGknBjiCzfLYiDgIGWe47eWfTw8OUqvq5bJdHQU4jtfxxn0sByp9y/LbijsLE1mw5+uoVRkKTKPh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ9KwcqfMvy24o6CxNZr+frqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWa/n66hWGQpMouDxvGknBjiCzfLYiDkIGWe47eWfTw8OUqvq5bJdHAY4jtfxxnwrByp8y/LbijsLE1mw5+uoVhkKTKLg8bxpJwY4gs3y2Ig5CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ8KwcqfMvy24o6CxNZsOfrqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWbDn66hWGQpMouDxvGknBjiCzfLYiDgIGWe47eWfTw8OU="
       />
     </div>
   );
