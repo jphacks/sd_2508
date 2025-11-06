@@ -88,7 +88,7 @@ export default function Dashboard({ currentMode, setCurrentMode }: DashboardProp
           className={`mode-btn ${currentMode === 'mode3' ? 'active' : ''}`}
           onClick={() => handleModeChange('mode3')}
         >
-          <h3 style={{ fontSize: '24px' }}>屋外はぐれ検知</h3>
+          <h3 style={{ fontSize: '24px' }}>GPS検知</h3>
           <p style={{ fontSize: '14px', marginTop: '8px' }}>機能3</p>
           <p style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
             GPSで保護者からの距離を確認

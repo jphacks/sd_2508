@@ -29,8 +29,6 @@ interface Mode2Props {
   onAlertThresholdChange?: (threshold: number) => void;
   alertEnabled?: boolean;
   onAlertEnabledChange?: (enabled: boolean) => void;
-  alertSound?: boolean;
-  onAlertSoundChange?: (enabled: boolean) => void;
   connectionTimeout?: number;
   onConnectionTimeoutChange?: (timeout: number) => void;
   showAllDevices?: boolean;
@@ -57,8 +55,6 @@ export default function Mode2Bus({
   onAlertThresholdChange,
   alertEnabled: externalAlertEnabled,
   onAlertEnabledChange,
-  alertSound: externalAlertSound,
-  onAlertSoundChange,
   connectionTimeout: externalConnectionTimeout,
   onConnectionTimeoutChange,
   showAllDevices: externalShowAllDevices,
@@ -75,7 +71,6 @@ export default function Mode2Bus({
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [internalAlertThreshold, setInternalAlertThreshold] = useState(3);
   const [internalAlertEnabled, setInternalAlertEnabled] = useState(true);
-  const [internalAlertSound, setInternalAlertSound] = useState(true);
   const [internalRssiThreshold, setInternalRssiThreshold] = useState(-75);
   const [internalConnectionTimeout, setInternalConnectionTimeout] = useState(10);
   const [internalShowAllDevices, setInternalShowAllDevices] = useState(false);
@@ -113,7 +108,6 @@ export default function Mode2Bus({
   const rssiThreshold = isExternallyControlled ? externalRssiThreshold || -75 : internalRssiThreshold;
   const alertThreshold = isExternallyControlled ? externalAlertThreshold || 3 : internalAlertThreshold;
   const alertEnabled = true;  // 🔧 常に有効に固定
-  const alertSound = isExternallyControlled ? externalAlertSound || true : internalAlertSound;
   const connectionTimeout = isExternallyControlled ? externalConnectionTimeout || 10 : internalConnectionTimeout;
   const showAllDevices = isExternallyControlled ? externalShowAllDevices || false : internalShowAllDevices;
   const busRange = isExternallyControlled ? externalBusRange || 5 : internalBusRange;
@@ -129,28 +123,6 @@ export default function Mode2Bus({
       });
     } catch (error) {
       console.error(`バス状態更新エラー (${deviceId}):`, error);
-    }
-  }, []);
-
-  const playAlertSound = useCallback(() => {
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      
-      const audioContext = new AudioContext();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      
-      oscillator.start();
-      oscillator.stop(audioContext.currentTime + 0.5);
-    } catch (error) {
-      console.error('警告音の再生に失敗:', error);
     }
   }, []);
 
@@ -249,10 +221,6 @@ export default function Mode2Bus({
 判定基準: RSSI ${effectiveRssiThreshold}dBm以上をバス内と判定`;
             
             setAlertMessage(message);
-            
-            if (alertSound) {
-              playAlertSound();
-            }
           }
         }
       } else {
@@ -261,7 +229,7 @@ export default function Mode2Bus({
     } catch (error) {
       console.error('❌ 置き去り検知処理エラー:', error);
     }
-  }, [rssiThreshold, selectedBeacon, alertThreshold, alertEnabled, alertSound, devices, estimateDistance, updateBusStatusInFirebase, playAlertSound]);
+  }, [rssiThreshold, selectedBeacon, alertThreshold, alertEnabled, devices, estimateDistance, updateBusStatusInFirebase]);
 
   // === 設定変更ハンドラー ===
   const handleSelectedBeaconChange = useCallback((value: string) => {
@@ -354,14 +322,6 @@ export default function Mode2Bus({
       setInternalAlertEnabled(value);
     }
   }, [onAlertEnabledChange]);
-
-  const handleAlertSoundChange = useCallback((value: boolean) => {
-    if (onAlertSoundChange) {
-      onAlertSoundChange(value);
-    } else {
-      setInternalAlertSound(value);
-    }
-  }, [onAlertSoundChange]);
 
   const handleConnectionTimeoutChange = useCallback((value: number) => {
     if (onConnectionTimeoutChange) {
@@ -951,55 +911,6 @@ export default function Mode2Bus({
               max={10}
             />
           </div>
-
-          {/* 各種トグルボタン */}
-          {[
-            { label: '警告音', value: alertSound, handler: handleAlertSoundChange },
-          ].map(({ label, value, handler }) => (
-            <div key={label}>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '8px', 
-                fontWeight: '600', 
-                color: '#333' 
-              }}>
-                {label}
-              </label>
-              <button
-                onClick={() => handler(!value)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '10px 16px',
-                  borderRadius: '25px',
-                  border: 'none',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  backgroundColor: value ? '#4CAF50' : '#E0E0E0',
-                  color: value ? 'white' : '#666',
-                  transition: 'all 0.3s ease',
-                  width: '100%'
-                }}
-              >
-                <div
-                  style={{
-                    width: '20px',
-                    height: '20px',
-                    borderRadius: '50%',
-                    backgroundColor: 'white'
-                  }}
-                />
-                {value ? '有効' : '無効'}
-              </button>
-              {label === '全デバイス表示' && (
-                <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                  {value ? 'バス外のデバイスも表示されます' : 'バス内のデバイスのみ表示されます'}
-                </div>
-              )}
-            </div>
-          ))}
         </div>
       </div>
       </div>

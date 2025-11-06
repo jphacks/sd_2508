@@ -46,7 +46,6 @@ export default function Dashboard() {
   const [rssiThreshold, setRssiThreshold] = useState(-75);
   const [alertThreshold, setAlertThreshold] = useState(3);
   const [alertEnabled, setAlertEnabled] = useState(true);
-  const [alertSound, setAlertSound] = useState(true);
   const [connectionTimeout, setConnectionTimeout] = useState(10);
   const [showAllDevices, setShowAllDevices] = useState(false);
 
@@ -218,11 +217,6 @@ export default function Dashboard() {
     console.log('🚨 警告有効/無効:', enabled);
   }, []);
 
-  const handleAlertSoundChange = useCallback((enabled: boolean) => {
-    setAlertSound(enabled);
-    console.log('🔊 警告音有効/無効:', enabled);
-  }, []);
-
   const handleConnectionTimeoutChange = useCallback((timeout: number) => {
     setConnectionTimeout(timeout);
     console.log('⏱️ 接続タイムアウト変更:', timeout);
@@ -267,7 +261,7 @@ export default function Dashboard() {
       icon: ''
     },
     gps: {
-      title: '屋外はぐれ検知',
+      title: 'GPS検知',
       description: '屋外での高精度位置追跡',
       color: '#4CAF50',
       icon: ''
@@ -1025,8 +1019,6 @@ export default function Dashboard() {
                 onAlertThresholdChange={handleAlertThresholdChange}
                 alertEnabled={alertEnabled}
                 onAlertEnabledChange={handleAlertEnabledChange}
-                alertSound={alertSound}
-                onAlertSoundChange={handleAlertSoundChange}
                 connectionTimeout={connectionTimeout}
                 onConnectionTimeoutChange={handleConnectionTimeoutChange}
                 showAllDevices={showAllDevices}

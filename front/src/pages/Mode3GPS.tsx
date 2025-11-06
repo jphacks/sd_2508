@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { MapContainer, TileLayer, Marker, Circle, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle, Popup, Polyline, Tooltip, useMapEvent } from 'react-leaflet';
 import L from 'leaflet';
 import { calculateGPSDistance } from '../utils/positioning';
 
@@ -55,6 +55,19 @@ const alertIcon = new L.Icon({
   shadowSize: [41, 41]
 });
 
+// ズームレベル変化をリッスンするコンポーネント
+function MapZoomListener({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
+  useMapEvent('zoomend', (e) => {
+    onZoomChange(e.target.getZoom());
+  });
+  
+  useMapEvent('zoom', (e) => {
+    onZoomChange(e.target.getZoom());
+  });
+  
+  return null;
+}
+
 export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) {
   // 🔥 重複するstate管理を削除し、必要最小限に
   const [trackers, setTrackers] = useState<TrackerDevice[]>(externalDevices || []);
@@ -63,8 +76,8 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
   const [maxDistance, setMaxDistance] = useState(30);
   const [alerts, setAlerts] = useState<string[]>([]);
   const [alertEnabled, setAlertEnabled] = useState(true);
-  const [alertSound, setAlertSound] = useState(true);
   const [mapCenter, setMapCenter] = useState({ lat: 38.2559, lon: 140.8398 });
+  const [zoomLevel, setZoomLevel] = useState(16);
 
   // 🔥 重複するuseEffectを削除し、外部データ依存に変更
   useEffect(() => {
@@ -182,33 +195,15 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
     });
 
     setAlerts(newAlerts);
-
-    if (newAlerts.length > 0 && alertSound) {
-      playAlertSound();
-    }
   };
 
-  // 警告音再生（変更なし）
-  const playAlertSound = () => {
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      
-      const audioContext = new AudioContext();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      
-      oscillator.start();
-      oscillator.stop(audioContext.currentTime + 0.5);
-    } catch (error) {
-      console.error('警告音再生エラー:', error);
-    }
+  // ズームレベルに応じたフォントサイズを計算
+  const getTooltipFontSize = (): number => {
+    // ズームレベルが高いほど大きく、低いほど小さくなるように調整
+    // ズームレベル16の時は12px、ズームレベル12の時は8px、18の時は14px
+    const baseFontSize = 12;
+    const zoomDifference = zoomLevel - 16;
+    return Math.max(8, baseFontSize + (zoomDifference * 0.5));
   };
 
   // 子トラッカーが離れすぎているかチェック（変更なし）
@@ -258,7 +253,7 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
     return (
       <div className="container">
         <div className="card">
-          <h2>🔄 GPS情報を読み込み中...</h2>
+          <h2>GPS情報を読み込み中...</h2>
           <p>デバイスの位置情報を取得しています。</p>
         </div>
       </div>
@@ -268,7 +263,7 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
   return (
     <div className="container">
       <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-        🌍 機能3: 屋外GPS追跡
+        機能3: 屋外GPS追跡
       </h1>
 
       {/* 警告表示 */}
@@ -276,7 +271,7 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
         <div key={index} className="alert alert-danger" style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <strong>⚠️ 警告</strong>
+              <strong>警告</strong>
               <p style={{ marginTop: '8px', margin: 0 }}>{alert}</p>
             </div>
             <button
@@ -295,171 +290,52 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
         </div>
       ))}
 
-      {/* リアルタイム位置追跡マップ */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <h2 style={{ marginBottom: '16px' }}>📍 リアルタイム位置追跡</h2>
-        <div style={{ height: '500px', borderRadius: '12px', overflow: 'hidden' }}>
-          <MapContainer
-            center={[mapCenter.lat, mapCenter.lon]}
-            zoom={16}
-            style={{ height: '100%', width: '100%' }}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            
-            {/* 親トラッカーとその検知範囲 */}
-            {trackers.filter(t => parentTrackers.includes(t.id) && t.position).map(tracker => (
-              <div key={tracker.id}>
-                <Marker position={[tracker.position!.lat, tracker.position!.lon]} icon={parentIcon}>
-                  <Popup>
-                    <div>
-                      <strong>{tracker.name}</strong><br />
-                      🔵 親トラッカー<br />
-                      📡 検知範囲: {maxDistance}m<br />
-                      🕐 更新: {tracker.lastUpdate?.toLocaleTimeString('ja-JP') || 'N/A'}
-                      {tracker.position?.accuracy && (
-                        <><br />📍 精度: ±{tracker.position.accuracy}m</>
-                      )}
-                    </div>
-                  </Popup>
-                </Marker>
-                <Circle
-                  center={[tracker.position!.lat, tracker.position!.lon]}
-                  radius={maxDistance}
-                  pathOptions={{ color: '#4A90E2', fillColor: '#4A90E2', fillOpacity: 0.1 }}
-                />
-              </div>
-            ))}
-
-            {/* 子トラッカー */}
-            {trackers.filter(t => !parentTrackers.includes(t.id) && t.position).map(tracker => {
-              const tooFar = isChildTooFar(tracker.id);
-              const parent = trackers.find(t => parentTrackers.includes(t.id) && t.position);
-              
-              return (
-                <div key={tracker.id}>
-                  <Marker
-                    position={[tracker.position!.lat, tracker.position!.lon]}
-                    icon={tooFar ? alertIcon : childIcon}
-                  >
-                    <Popup>
-                      <div>
-                        <strong>{tracker.name}</strong><br />
-                        {tooFar ? '🔴 子トラッカー（警告）' : '🟢 子トラッカー（正常）'}<br />
-                        🕐 更新: {tracker.lastUpdate?.toLocaleTimeString('ja-JP') || 'N/A'}
-                        {tracker.position?.accuracy && (
-                          <><br />📍 精度: ±{tracker.position.accuracy}m</>
-                        )}
-                        {tooFar && <><br /><span style={{ color: '#E74C3C' }}>⚠️ 親から離れすぎています</span></>}
-                      </div>
-                    </Popup>
-                  </Marker>
-                  
-                  {/* 親との接続線 */}
-                  {parent && parent.position && (
-                    <Polyline
-                      positions={[
-                        [parent.position.lat, parent.position.lon],
-                        [tracker.position!.lat, tracker.position!.lon]
-                      ]}
-                      pathOptions={{
-                        color: tooFar ? '#E74C3C' : '#4A90E2',
-                        weight: 2,
-                        dashArray: '5, 10'
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </MapContainer>
-        </div>
-      
-        {/* GPS情報サマリー */}
-        <div style={{ 
-          marginTop: '12px', 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', 
-          gap: '12px',
-          fontSize: '14px',
-          color: '#666'
-        }}>
-          <div>📍 追跡中: {trackers.filter(t => t.position).length}台</div>
-          <div>🔵 親トラッカー: {trackers.filter(t => parentTrackers.includes(t.id)).length}台</div>
-          <div>🟢 子トラッカー: {trackers.filter(t => !parentTrackers.includes(t.id)).length}台</div>
-          <div>⚠️ 警告中: {trackers.filter(t => !parentTrackers.includes(t.id) && isChildTooFar(t.id)).length}台</div>
-        </div>
-      </div>
-
-      {/* 既存のトラッカー一覧と設定パネル */}
-      <div className="grid grid-2">
+      {/* 設定パネルとマップの横並びレイアウト */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: '3fr 7fr', 
+        gap: '24px', 
+        marginBottom: '24px', 
+        alignItems: 'start' 
+      }}>
+        {/* 設定パネル（左側） */}
         <div className="card">
-          <h3 style={{ marginBottom: '16px' }}>📱 トラッカー一覧</h3>
-          {trackers.length > 0 ? trackers.map(tracker => {
-            const isParent = parentTrackers.includes(tracker.id);
-            const tooFar = !isParent && isChildTooFar(tracker.id);
-            
-            return (
-              <div
-                key={tracker.id}
-                style={{
-                  padding: '16px',
-                  borderBottom: '1px solid #e1e8ed',
-                  backgroundColor: tooFar ? '#FFEBEE' : (isParent ? '#E3F2FD' : '#F8F9FA')
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                      <strong style={{ fontSize: '16px' }}>{tracker.name}</strong>
-                      <span style={{
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '10px',
-                        fontWeight: 'bold',
-                        backgroundColor: isParent ? '#2196F3' : '#4CAF50',
-                        color: 'white'
-                      }}>
-                        {isParent ? '親' : '子'}
-                      </span>
-                      {tooFar && (
-                        <span style={{
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          fontSize: '10px',
-                          fontWeight: 'bold',
-                          backgroundColor: '#F44336',
-                          color: 'white'
-                        }}>
-                          警告
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>
-                      ID: {tracker.deviceId || tracker.id}
-                    </div>
-                    
-                    {tracker.position ? (
-                      <div style={{ fontSize: '12px', color: '#666' }}>
-                        📍 GPS取得済み
-                        {tracker.lastUpdate && (
-                          <span style={{ marginLeft: '8px' }}>
-                            更新: {tracker.lastUpdate.toLocaleTimeString('ja-JP')}
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '12px', color: '#999' }}>
-                        📭 GPS待機中
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', cursor: 'pointer' }}>
+          <h3 style={{ marginBottom: '16px' }}>設定</h3>
+          
+          {/* 親トラッカー選択 */}
+          <div className="form-group">
+            <label className="form-label">親トラッカー選択</label>
+            <p style={{ fontSize: '12px', color: '#7f8c8d', marginBottom: '12px' }}>
+              保護者が持つトラッカーを選択してください
+            </p>
+            {trackers.length > 0 ? (
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                gap: '8px',
+                maxHeight: '200px',
+                overflowY: 'auto',
+                padding: '8px',
+                border: '1px solid #e1e8ed',
+                borderRadius: '8px',
+                backgroundColor: '#f8f9fa'
+              }}>
+                {trackers.map(tracker => {
+                  const isParent = parentTrackers.includes(tracker.id);
+                  return (
+                    <label 
+                      key={tracker.id}
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '8px', 
+                        padding: '8px',
+                        backgroundColor: isParent ? '#E3F2FD' : 'white',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.2s'
+                      }}
+                    >
                       <input
                         type="checkbox"
                         checked={isParent}
@@ -472,26 +348,39 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
                         }}
                         style={{ transform: 'scale(1.2)' }}
                       />
-                      親に設定
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '500' }}>{tracker.name}</div>
+                        <div style={{ fontSize: '11px', color: '#666' }}>ID: {tracker.deviceId || tracker.id}</div>
+                      </div>
+                      {isParent && (
+                        <span style={{
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          fontSize: '10px',
+                          fontWeight: 'bold',
+                          backgroundColor: '#2196F3',
+                          color: 'white'
+                        }}>
+                          親
+                        </span>
+                      )}
                     </label>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
-            );
-          }) : (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>📱</div>
-              <h4 style={{ margin: '0 0 8px 0' }}>トラッカーがありません</h4>
-              <p style={{ margin: 0, fontSize: '14px' }}>
-                Firestoreにデバイスが登録されていません
-              </p>
-            </div>
-          )}
-        </div>
+            ) : (
+              <div style={{ 
+                padding: '16px', 
+                textAlign: 'center', 
+                color: '#999',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px'
+              }}>
+                トラッカーがありません
+              </div>
+            )}
+          </div>
 
-        {/* 既存の設定パネル */}
-        <div className="card">
-          <h3 style={{ marginBottom: '16px' }}>⚙️ 設定</h3>
           <div className="form-group">
             <label className="form-label">
               最大距離（メートル）
@@ -510,7 +399,7 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
             </p>
           </div>
           <div className="form-group">
-            <label className="form-label">位置逸脱警告</label>
+            <label className="form-label">はぐれ警告</label>
             <button
               onClick={() => setAlertEnabled(!alertEnabled)}
               style={{
@@ -540,59 +429,114 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
               {alertEnabled ? '有効' : '無効'}
             </button>
           </div>
-          <div className="form-group">
-            <label className="form-label">警告音</label>
-            <button
-              onClick={() => setAlertSound(!alertSound)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '8px 16px',
-                borderRadius: '20px',
-                border: 'none',
-                fontSize: '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                backgroundColor: alertSound ? '#50C878' : '#E0E0E0',
-                color: alertSound ? 'white' : '#666'
-              }}
+        </div>
+
+        {/* マップ（右側） */}
+        <div className="card">
+          <h2 style={{ marginBottom: '16px' }}>リアルタイム位置追跡</h2>
+          <div style={{ height: '500px', borderRadius: '12px', overflow: 'hidden' }}>
+            <MapContainer
+              center={[mapCenter.lat, mapCenter.lon]}
+              zoom={16}
+              style={{ height: '100%', width: '100%' }}
             >
-              <div
-                style={{
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '50%',
-                  backgroundColor: 'white',
-                  transition: 'transform 0.3s ease'
-                }}
-              />
-              {alertSound ? '有効' : '無効'}
-            </button>
+            <MapZoomListener onZoomChange={setZoomLevel} />
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            
+            {/* 親トラッカーとその検知範囲 */}
+            {trackers.filter(t => parentTrackers.includes(t.id) && t.position).map(tracker => (
+              <div key={tracker.id}>
+                <Marker position={[tracker.position!.lat, tracker.position!.lon]} icon={parentIcon}>
+                    <Tooltip permanent={true} direction="top" offset={[0, -30]} className="marker-tooltip">
+                      <div style={{ fontSize: `${getTooltipFontSize()}px`, fontWeight: 'bold' }}>{tracker.name}</div>
+                    </Tooltip>
+                    <Popup>
+                      <div>
+                        <strong>{tracker.name}</strong><br />
+                        ID: {tracker.deviceId || tracker.id}<br />
+                        親トラッカー<br />
+                        検知範囲: {maxDistance}m<br />
+                        更新: {tracker.lastUpdate?.toLocaleTimeString('ja-JP') || 'N/A'}
+                        {tracker.position?.accuracy && (
+                          <><br />精度: ±{tracker.position.accuracy}m</>
+                        )}
+                      </div>
+                    </Popup>
+                </Marker>
+                <Circle
+                  center={[tracker.position!.lat, tracker.position!.lon]}
+                  radius={maxDistance}
+                  pathOptions={{ color: '#4A90E2', fillColor: '#4A90E2', fillOpacity: 0.1 }}
+                />
+              </div>
+            ))}
+
+            {/* 子トラッカー */}
+            {trackers.filter(t => !parentTrackers.includes(t.id) && t.position).map(tracker => {
+              const tooFar = isChildTooFar(tracker.id);
+              const parent = trackers.find(t => parentTrackers.includes(t.id) && t.position);
+              
+              return (
+                <div key={tracker.id}>
+                  <Marker
+                    position={[tracker.position!.lat, tracker.position!.lon]}
+                    icon={tooFar ? alertIcon : childIcon}
+                  >
+                    <Tooltip permanent={true} direction="top" offset={[0, -30]} className="marker-tooltip">
+                      <div style={{ fontSize: `${getTooltipFontSize()}px`, fontWeight: 'bold' }}>{tracker.name}</div>
+                    </Tooltip>
+                    <Popup>
+                      <div>
+                        <strong>{tracker.name}</strong><br />
+                        ID: {tracker.deviceId || tracker.id}<br />
+                        {tooFar ? '子トラッカー（警告）' : '子トラッカー（正常）'}<br />
+                        更新: {tracker.lastUpdate?.toLocaleTimeString('ja-JP') || 'N/A'}
+                        {tracker.position?.accuracy && (
+                          <><br />精度: ±{tracker.position.accuracy}m</>
+                        )}
+                        {tooFar && <><br /><span style={{ color: '#E74C3C' }}>親から離れすぎています</span></>}
+                      </div>
+                    </Popup>
+                  </Marker>
+                  
+                  {/* 親との接続線 */}
+                  {parent && parent.position && (
+                    <Polyline
+                      positions={[
+                        [parent.position.lat, parent.position.lon],
+                        [tracker.position!.lat, tracker.position!.lon]
+                      ]}
+                      pathOptions={{
+                        color: tooFar ? '#E74C3C' : '#4A90E2',
+                        weight: 2,
+                        dashArray: '5, 10'
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </MapContainer>
           </div>
-          <div className="form-group">
-            <button
-              onClick={playAlertSound}
-              className="btn btn-outline"
-              style={{ width: '100%' }}
-            >
-              🔊 警告音をテスト
-            </button>
+        
+          {/* GPS情報サマリー */}
+          <div style={{ 
+            marginTop: '12px', 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', 
+            gap: '12px',
+            fontSize: '14px',
+            color: '#666'
+          }}>
+            <div>追跡中: {trackers.filter(t => t.position).length}台</div>
+            <div>親: {trackers.filter(t => parentTrackers.includes(t.id)).length}台</div>
+            <div>子: {trackers.filter(t => !parentTrackers.includes(t.id)).length}台</div>
+            <div>警告: {trackers.filter(t => !parentTrackers.includes(t.id) && isChildTooFar(t.id)).length}台</div>
           </div>
         </div>
-      </div>
-
-      {/* 使い方説明 */}
-      <div className="card" style={{ marginTop: '24px' }}>
-        <h3 style={{ marginBottom: '16px' }}>📖 使い方</h3>
-        <ol style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
-          <li>保護者（親）が持つトラッカーを「親トラッカー」として設定します</li>
-          <li>子どもが持つトラッカーは自動的に「子トラッカー」になります</li>
-          <li>子トラッカーが親トラッカーから設定距離（デフォルト30m）以上離れると警告します</li>
-          <li>複数の親トラッカーを設定できます（いずれかの親から離れると警告）</li>
-          <li>リアルタイムでGPS位置情報が更新され、距離を監視します</li>
-        </ol>
       </div>
     </div>
   );
