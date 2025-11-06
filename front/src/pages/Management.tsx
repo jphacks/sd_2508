@@ -239,7 +239,6 @@ export default function Management() {
                       <th style={{ padding: '12px' }}>所持者</th>
                       <th style={{ padding: '12px' }}>DevEUI</th>
                       <th style={{ padding: '12px' }}>モデル</th>
-                      <th style={{ padding: '12px' }}>状態</th>
                       <th style={{ padding: '12px' }}>操作</th>
                     </tr>
                   </thead>
@@ -267,17 +266,6 @@ export default function Management() {
                             {device.devEUI}
                           </td>
                           <td style={{ padding: '12px' }}>{device.model}</td>
-                          <td style={{ padding: '12px' }}>
-                            <span style={{
-                              padding: '4px 12px',
-                              borderRadius: '12px',
-                              fontSize: '12px',
-                              backgroundColor: device.status === 'active' ? '#D4EDDA' : '#F8D7DA',
-                              color: device.status === 'active' ? '#155724' : '#721C24'
-                            }}>
-                              {device.status === 'active' ? 'アクティブ' : '非アクティブ'}
-                            </span>
-                          </td>
                           <td style={{ padding: '12px' }}>
                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {isEditing ? (
