@@ -629,8 +629,13 @@ export default function Mode2Bus({
     <div style={{ 
       padding: '24px', 
       backgroundColor: '#f8f9fa',
-      minHeight: '100vh'
+      minHeight: '100vh',
+      maxWidth: '1400px',
+      margin: '0 auto'
     }}>
+      <h1 style={{ fontSize: "32px", fontWeight: "700", margin: 0, marginBottom: '24px' }}>
+        機能2 : バス置き去り検知
+      </h1>
       {/* 警告メッセージ */}
       {alertMessage && (
         <div style={{

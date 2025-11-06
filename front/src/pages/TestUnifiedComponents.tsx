@@ -672,12 +672,6 @@ export default function Dashboard() {
           maxWidth: '1400px', 
           margin: '0 auto'
         }}>
-          <ModeSelector
-            currentMode={currentMode}
-            onModeChange={handleModeChange}
-            modeConfigs={modeConfigs}
-          />
-
           {/* デバイス状態表示テーブルを復元 */}
           <div style={{
             backgroundColor: 'white',
@@ -790,6 +784,21 @@ export default function Dashboard() {
                       const busStatus = getBusStatus(device);
                       const gpsStatus = getGPSStatus(device);
                       const latestBleData = device.bleData?.find(ble => ble && ble.beaconId === selectedBeacon);
+                      
+                      // 経過時間を計算
+                      const getTimeAgo = (date: Date | null) => {
+                        if (!date) return '';
+                        const now = new Date();
+                        const diffMs = now.getTime() - new Date(date).getTime();
+                        const diffMinutes = Math.floor(diffMs / (1000 * 60));
+                        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                        
+                        if (diffDays > 0) return `${diffDays}日前`;
+                        if (diffHours > 0) return `${diffHours}時間前`;
+                        if (diffMinutes > 0) return `${diffMinutes}分前`;
+                        return '1分以内';
+                      };
 
                       return (
                         <tr 
@@ -804,23 +813,30 @@ export default function Dashboard() {
                             padding: '12px 16px',
                             borderRight: '1px solid #dee2e6'
                           }}>
-                            <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                              {device.name}
+                            <div style={{ marginBottom: '4px' }}>
+                              <span style={{ fontWeight: 'bold' }}>{device.name}</span>
+                              <span style={{
+                                fontSize: '12px',
+                                color: '#666',
+                                fontFamily: 'monospace',
+                                marginLeft: '8px'
+                              }}>
+                                ({device.deviceId})
+                              </span>
                             </div>
                             <div style={{
-                              fontSize: '12px',
-                              color: '#666',
-                              fontFamily: 'monospace'
+                              fontSize: '11px',
+                              color: '#999'
                             }}>
-                              {device.deviceId}
+                              {device.lastUpdate ? (
+                                <>
+                                  {new Date(device.lastUpdate).toLocaleString('ja-JP')}
+                                  <span style={{ marginLeft: '4px' }}>
+                                    ({getTimeAgo(device.lastUpdate)})
+                                  </span>
+                                </>
+                              ) : '更新情報なし'}
                             </div>
-                            {/* <div style={{
-                              fontSize: '12px',
-                              color: '#666',
-                              fontFamily: 'monospace'
-                            }}>
-                              devEUI: {device.devEUI}
-                            </div> */}
                           </td>
 
                           {/* 室内検知 */}
@@ -895,31 +911,6 @@ export default function Dashboard() {
                             </div>
                           </td>
 
-                          {/* 最新BLE */}
-                          {/* <td style={{
-                            padding: '12px 16px',
-                            textAlign: 'center',
-                            borderRight: '1px solid #dee2e6'
-                          }}>
-                            {latestBleData ? (
-                              <div>
-                                <div style={{ fontWeight: 'bold' }}>
-                                  {latestBleData.rssi}dBm
-                                </div>
-                                <div style={{ fontSize: '12px', color: '#666' }}>
-                                  {estimateDistance(latestBleData.rssi).toFixed(1)}m
-                                </div>
-                                <div style={{ fontSize: '11px', color: '#999' }}>
-                                  {new Date(latestBleData.timestamp).toLocaleTimeString('ja-JP')}
-                                </div>
-                              </div>
-                            ) : (
-                              <span style={{ color: '#999', fontSize: '12px' }}>
-                                未受信
-                              </span>
-                            )}
-                          </td> */}
-
                           {/* GPS */}
                           <td style={{
                             padding: '12px 16px',
@@ -977,37 +968,20 @@ export default function Dashboard() {
             )}
           </div>
 
+          <ModeSelector
+            currentMode={currentMode}
+            onModeChange={handleModeChange}
+            modeConfigs={modeConfigs}
+          />
+
           {currentMode === 'indoor' && (
             <div>
-              <h2 style={{
-                fontSize: '20px',
-                fontWeight: 'bold',
-                color: modeConfigs.indoor.color,
-                marginBottom: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                {modeConfigs.indoor.icon} {modeConfigs.indoor.title} ダッシュボード
-              </h2>
               <Mode1Indoor devices={devices} />
             </div>
           )}
 
           {currentMode === 'bus' && (
             <div>
-              <h2 style={{
-                fontSize: '20px',
-                fontWeight: 'bold',
-                color: modeConfigs.bus.color,
-                marginBottom: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                {modeConfigs.bus.icon} {modeConfigs.bus.title} ダッシュボード
-              </h2>
-              
               <Mode2Bus 
                 devices={devices} 
                 beacons={beacons}
@@ -1031,18 +1005,6 @@ export default function Dashboard() {
 
           {currentMode === 'gps' && (
             <div>
-              <h2 style={{
-                fontSize: '20px',
-                fontWeight: 'bold',
-                color: modeConfigs.gps.color,
-                marginBottom: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                {modeConfigs.gps.icon} {modeConfigs.gps.title} ダッシュボード
-              </h2>
-              
               <Mode3GPS devices={devices} />
             </div>
           )}

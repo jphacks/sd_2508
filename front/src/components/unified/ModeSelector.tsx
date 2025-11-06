@@ -271,69 +271,11 @@ export default function ModeSelector({
                   marginTop: '16px',
                   textAlign: 'center'
                 }}>
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '8px 16px',
-                    backgroundColor: config.color,
-                    color: 'white',
-                    borderRadius: '20px',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    opacity: 0.9,
-                    transition: 'opacity 0.2s ease'
-                  }}>
-                    <span>👆</span>
-                    <span>クリックで選択</span>
-                  </div>
                 </div>
               )}
             </div>
           );
         })}
-      </div>
-
-      {/* 現在の選択状態 */}
-      <div style={{
-        marginTop: '24px',
-        padding: '16px',
-        backgroundColor: `${modeConfigs[currentMode].color}10`,
-        borderRadius: '12px',
-        border: `2px solid ${modeConfigs[currentMode].color}30`,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px'
-      }}>
-        <div style={{ fontSize: '24px' }}>
-          {modeConfigs[currentMode].icon}
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: modeConfigs[currentMode].color,
-            marginBottom: '4px'
-          }}>
-            現在のモード: {modeConfigs[currentMode].title}
-          </div>
-          <div style={{
-            fontSize: '12px',
-            color: '#666'
-          }}>
-            {modeConfigs[currentMode].description}
-          </div>
-        </div>
-        <div style={{
-          padding: '6px 12px',
-          backgroundColor: modeConfigs[currentMode].color,
-          color: 'white',
-          borderRadius: '20px',
-          fontSize: '12px',
-          fontWeight: 'bold'
-        }}>
-          ✓ アクティブ
-        </div>
       </div>
     </div>
   );

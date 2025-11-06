@@ -1313,7 +1313,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   }
 
   return (
-    <div className="container">
+    <div className="container" style={{ maxWidth: '1400px' }}>
       <div
         style={{
           display: "flex",
