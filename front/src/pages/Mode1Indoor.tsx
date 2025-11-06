@@ -425,11 +425,14 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       }
 
       // ビーコンシグナル更新
-      const signals: BeaconSignal[] = device.bleData.map(ble => ({
-        beaconId: ble.beaconId || ble.mac,
-        mac: ble.mac,
-        rssi: ble.rssi
-      }));
+      const signals: BeaconSignal[] = device.bleData.map(ble => {
+        const beaconInfo = getBeaconInfo(ble.mac);
+        return {
+          beaconId: beaconInfo?.beaconId || ble.beaconId || ble.mac,
+          mac: ble.mac,
+          rssi: ble.rssi
+        };
+      });
       
       console.log(`📶 Mode1 シグナル更新: ${device.name}`, signals);
       setDeviceBeaconSignals(prev => new Map(prev.set(device.devEUI, signals)));
@@ -1635,8 +1638,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
                 }}
               >
                 <div style={{ fontWeight: 600, marginBottom: tooltip.signals.length > 0 ? "6px" : "0" }}>
-                  {tooltipDevice?.userName ||
-                    tooltipDevice?.deviceId ||
+                  {tooltipDevice?.deviceId ||
                     tooltip.deviceId}
                 </div>
                 {tooltip.signals.length > 0 ? (

@@ -108,21 +108,12 @@ export default function Mode2Bus({
   // === ユーティリティ関数 ===
   const updateBusStatusInFirebase = useCallback(async (deviceId: string, devEUI: string, isInBus: boolean) => {
     try {
-      const [deviceDocRef, statusRef] = [
-        doc(db, 'devices', deviceId),
-        ref(rtdb, `devices/${devEUI.toLowerCase()}/status`)
-      ];
+      const statusRef = ref(rtdb, `devices/${devEUI.toLowerCase()}/status`);
 
-      await Promise.all([
-        updateDoc(deviceDocRef, {
-          'status.inBus': isInBus,
-          'status.busStatusUpdatedAt': new Date().toISOString()
-        }),
-        update(statusRef, {
-          inBus: isInBus,
-          busStatusUpdatedAt: new Date().toISOString()
-        })
-      ]);
+      await update(statusRef, {
+        inBus: isInBus,
+        busStatusUpdatedAt: new Date().toISOString()
+      });
     } catch (error) {
       console.error(`バス状態更新エラー (${deviceId}):`, error);
     }
