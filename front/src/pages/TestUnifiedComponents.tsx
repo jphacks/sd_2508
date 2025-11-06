@@ -43,6 +43,7 @@ export default function Dashboard() {
 
   // 🔧 バス監視設定を追加（範囲ベース）
   const [busRange, setBusRange] = useState(5); // メートル単位
+  const [rssiThreshold, setRssiThreshold] = useState(-75);
   const [alertThreshold, setAlertThreshold] = useState(3);
   const [alertEnabled, setAlertEnabled] = useState(true);
   const [alertSound, setAlertSound] = useState(true);
@@ -78,8 +79,8 @@ export default function Dashboard() {
 
   // 🔧 動的に計算されたRSSI閾値
   const calculatedRssiThreshold = useMemo(() => {
-    return distanceToRssi(busRange);
-  }, [busRange, distanceToRssi]);
+    return rssiThreshold;
+  }, [rssiThreshold]);
 
   // 🔧 Firebase更新用のヘルパー関数を追加
   const updateBusStatusInFirebase = useCallback(async (deviceId: string, devEUI: string, isInBus: boolean) => {
@@ -101,7 +102,9 @@ export default function Dashboard() {
   const updateBusStatusForAllDevices = useCallback(async (overrideBusRange?: number, overrideSelectedBeacon?: string) => {
     const effectiveBusRange = overrideBusRange ?? busRange;
     const effectiveSelectedBeacon = overrideSelectedBeacon ?? selectedBeacon;
-    const effectiveRssiThreshold = distanceToRssi(effectiveBusRange);
+    const effectiveRssiThreshold = overrideBusRange !== undefined
+      ? distanceToRssi(overrideBusRange)
+      : rssiThreshold;
     
     if (!effectiveSelectedBeacon || devices.length === 0) {
       console.log('⚠️ バス状態更新スキップ: ビーコン未選択またはデバイスなし');
@@ -163,7 +166,7 @@ export default function Dashboard() {
     } catch (error) {
       console.error('❌ バス状態一括更新エラー:', error);
     }
-  }, [devices, busRange, selectedBeacon, distanceToRssi, estimateDistance, updateBusStatusInFirebase]);
+  }, [devices, busRange, selectedBeacon, distanceToRssi, estimateDistance, updateBusStatusInFirebase, rssiThreshold]);
 
   // 🔧 設定変更時に即座にバス状態を更新する関数を追加
   const lastUpdateRef = useRef<number>(0);
@@ -194,7 +197,13 @@ export default function Dashboard() {
 
   const handleBusRangeChange = useCallback(async (range: number) => {
     setBusRange(range);
-    console.log('📐 バス有効範囲変更:', range, 'm', '→ RSSI:', distanceToRssi(range), 'dBm');
+    const newThreshold = distanceToRssi(range);
+    setRssiThreshold(newThreshold);
+    console.log('📐 バス有効範囲変更:', range, 'm', '→ RSSI:', newThreshold, 'dBm');
+
+    if (triggerBusStatusUpdateRef.current) {
+      await triggerBusStatusUpdateRef.current(range);
+    }
   }, [distanceToRssi]);
 
 
@@ -227,6 +236,7 @@ export default function Dashboard() {
   // 🔧 RSSI閾値の直接変更ハンドラー
   const handleRssiThresholdChange = useCallback(async (threshold: number) => {
     console.log('📶 RSSI閾値変更開始:', threshold, 'dBm');
+    setRssiThreshold(threshold);
     
     // RSSI値から距離を逆算して範囲を更新
     const estimatedRange = estimateDistance(threshold);
@@ -234,7 +244,11 @@ export default function Dashboard() {
     console.log('📶 RSSI閾値変更:', threshold, 'dBm', '→ 推定範囲:', estimatedRange.toFixed(1), 'm', '→ 実際設定:', newRange, 'm');
     
     setBusRange(newRange);
-  }, [estimateDistance, setBusRange]);
+
+    if (triggerBusStatusUpdateRef.current) {
+      await triggerBusStatusUpdateRef.current(newRange);
+    }
+  }, [estimateDistance]);
 
 
 
@@ -275,21 +289,25 @@ export default function Dashboard() {
         
         // ビーコンデータを読み込み
         const beaconsSnapshot = await getDocs(collection(db, 'beacons'));
-        const beaconsData = beaconsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          name: doc.data().name || doc.id,
-          mac: doc.data().mac || '',
-          uuid: doc.data().uuid,
-          major: doc.data().major,
-          minor: doc.data().minor,
-          type: doc.data().type || 'ibeacon',
-          rssiAt1m: (typeof doc.data().rssiAt1m === 'number') ? doc.data().rssiAt1m : -59,
-          place: doc.data().place,
-          anchor_loc: doc.data().anchor_loc,
-          tags: doc.data().tags,
-          isActive: doc.data().isActive !== false,
-          lastSeen: doc.data().lastSeen || new Date().toISOString()
-        }));
+        const beaconsData = beaconsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            beaconId: data.beaconId || doc.id,
+            name: data.name || data.beaconId || doc.id,
+            mac: data.mac || '',
+            uuid: data.uuid,
+            major: data.major,
+            minor: data.minor,
+            type: data.type || 'ibeacon',
+            rssiAt1m: (typeof data.rssiAt1m === 'number') ? data.rssiAt1m : -59,
+            place: data.place,
+            anchor_loc: data.anchor_loc,
+            tags: data.tags,
+            isActive: data.isActive !== false,
+            lastSeen: data.lastSeen || new Date().toISOString()
+          };
+        });
         
         setBeacons(beaconsData);
         
@@ -476,28 +494,77 @@ export default function Dashboard() {
       hasBleData: !!device.bleData?.length
     });
 
-    // RTDBのstatus.inBusを最優先で確認
+    // 1. Mode2Busと同じローカルBLE判定を最優先で実行
+    if (!selectedBeacon) {
+      return { status: 'ビーコン未選択', color: '#856404', bgColor: '#fff3cd' };
+    }
+
+    const latestBleData = device.bleData?.find(ble =>
+      ble && ble.beaconId === selectedBeacon && typeof ble.rssi === 'number'
+    );
+
+    if (latestBleData) {
+      try {
+        const bleTimestamp = new Date(latestBleData.timestamp);
+        if (!isNaN(bleTimestamp.getTime())) {
+          const timeSinceLastBle = Date.now() - bleTimestamp.getTime();
+          const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000; // 5分以内
+          const isWithinBusRange = latestBleData.rssi >= calculatedRssiThreshold;
+          const estimatedDistance = estimateDistance(latestBleData.rssi);
+
+          console.log(`📊 ${device.name} ローカル判定:`, {
+            rssi: latestBleData.rssi,
+            threshold: calculatedRssiThreshold,
+            distance: estimatedDistance.toFixed(1),
+            isWithinRange: isWithinBusRange,
+            isRecent: isRecentlyReceived
+          });
+
+          if (isRecentlyReceived) {
+            if (isWithinBusRange) {
+              return {
+                status: 'バス内',
+                color: '#155724',
+                bgColor: '#d4edda'
+              };
+            }
+
+            return {
+              status: 'バス外',
+              color: '#721c24',
+              bgColor: '#f8d7da'
+            };
+          }
+
+          return { status: '受信タイムアウト', color: '#856404', bgColor: '#fff3cd' };
+        }
+      } catch (error) {
+        console.error('バス状態のBLE判定エラー:', error);
+        return { status: 'エラー', color: '#dc3545', bgColor: '#f8d7da' };
+      }
+    }
+
+    // 2. BLEデータが無い場合は、RTDBのステータスをフォールバックとして利用
     if (device.statusData && typeof device.statusData.inBus === 'boolean') {
       const isInBus = device.statusData.inBus;
       const lastUpdated = device.statusData.busStatusUpdatedAt;
-      
+
       if (lastUpdated) {
         try {
           const updateTime = new Date(lastUpdated);
-          const timeSinceUpdate = new Date().getTime() - updateTime.getTime();
-          
+          const timeSinceUpdate = Date.now() - updateTime.getTime();
+
           console.log(`📊 ${device.name} RTDB判定:`, {
             inBus: isInBus,
             timeSinceUpdate: Math.floor(timeSinceUpdate / 1000),
             isRecent: timeSinceUpdate < 5 * 60 * 1000
           });
-          
-          if (timeSinceUpdate < 5 * 60 * 1000) { // 5分以内
+
+          if (timeSinceUpdate < 5 * 60 * 1000) {
             if (isInBus) {
               return { status: 'バス内', color: '#155724', bgColor: '#d4edda' };
-            } else {
-              return { status: 'バス外', color: '#721c24', bgColor: '#f8d7da' };
             }
+            return { status: 'バス外', color: '#721c24', bgColor: '#f8d7da' };
           }
         } catch (error) {
           console.error('バス状態の時刻確認エラー:', error);
@@ -505,58 +572,8 @@ export default function Dashboard() {
       }
     }
 
-    // フォールバック: ローカルBLEデータから計算
-    if (!selectedBeacon) {
-      return { status: 'ビーコン未選択', color: '#856404', bgColor: '#fff3cd' };
-    }
-    
-    const latestBleData = device.bleData?.find(ble => 
-      ble && ble.beaconId === selectedBeacon && typeof ble.rssi === 'number'
-    );
-    
-    if (!latestBleData) {
-      return { status: 'BLE未受信', color: '#6c757d', bgColor: '#e9ecef' };
-    }
-
-    try {
-      const bleTimestamp = new Date(latestBleData.timestamp);
-      if (isNaN(bleTimestamp.getTime())) {
-        return { status: 'タイムスタンプエラー', color: '#856404', bgColor: '#fff3cd' };
-      }
-      
-      const timeSinceLastBle = new Date().getTime() - bleTimestamp.getTime();
-      const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000; // 5分以内
-      
-      // 🔧 RSSI閾値ベースの判定に統一
-      const isWithinBusRange = latestBleData.rssi >= calculatedRssiThreshold;
-      const estimatedDistance = estimateDistance(latestBleData.rssi);
-      
-      console.log(`📊 ${device.name} ローカル判定:`, {
-        rssi: latestBleData.rssi,
-        threshold: calculatedRssiThreshold,
-        distance: estimatedDistance.toFixed(1),
-        isWithinRange: isWithinBusRange,
-        isRecent: isRecentlyReceived
-      });
-      
-      if (isRecentlyReceived && isWithinBusRange) {
-        return { 
-          status: `バス内(${estimatedDistance.toFixed(1)}m)`, 
-          color: '#155724', 
-          bgColor: '#d4edda' 
-        };
-      } else if (isRecentlyReceived) {
-        return { 
-          status: `バス外(${estimatedDistance.toFixed(1)}m)`, 
-          color: '#721c24', 
-          bgColor: '#f8d7da' 
-        };
-      } else {
-        return { status: '受信タイムアウト', color: '#856404', bgColor: '#fff3cd' };
-      }
-    } catch (error) {
-      return { status: 'エラー', color: '#dc3545', bgColor: '#f8d7da' };
-    }
+    // 3. それでも判定できない場合は未受信扱い
+    return { status: 'BLE未受信', color: '#6c757d', bgColor: '#e9ecef' };
   };
 
     // 🔧 GPS状態判定関数を追加
@@ -718,7 +735,7 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '100px'
                       }}>
-                        温度
+                        室内検知
                       </th>
                       <th style={{
                         padding: '12px 16px',
@@ -736,9 +753,9 @@ export default function Dashboard() {
                         fontWeight: 'bold',
                         color: '#495057',
                         borderRight: '1px solid #dee2e6',
-                        minWidth: '100px'
+                        minWidth: '120px'
                       }}>
-                        室内検知
+                        バス内検知
                       </th>
                       <th style={{
                         padding: '12px 16px',
@@ -746,9 +763,9 @@ export default function Dashboard() {
                         fontWeight: 'bold',
                         color: '#495057',
                         borderRight: '1px solid #dee2e6',
-                        minWidth: '120px'
+                        minWidth: '100px'
                       }}>
-                        バス内検知
+                        温度
                       </th>
                       {/* <th style={{
                         padding: '12px 16px',
@@ -758,7 +775,7 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '120px'
                       }}>
-                        📶 最新BLE
+                        最新BLE
                       </th> */}
                       <th style={{
                         padding: '12px 16px',
@@ -812,42 +829,7 @@ export default function Dashboard() {
                             </div> */}
                           </td>
 
-                          {/* 温度 */}
-                          <td style={{
-                            padding: '12px 16px',
-                            textAlign: 'center',
-                            borderRight: '1px solid #dee2e6'
-                          }}>
-                            <div style={{
-                              fontSize: '16px',
-                              fontWeight: 'bold',
-                              color: '#333'
-                            }}>
-                              {temperatureDisplay}
-                            </div>
-                          </td>
-
-                          {/* 室内/室外 */}
-                          <td style={{
-                            padding: '12px 16px',
-                            textAlign: 'center',
-                            borderRight: '1px solid #dee2e6'
-                          }}>
-                            <span style={{
-                              padding: '4px 12px',
-                              borderRadius: '20px',
-                              fontSize: '12px',
-                              fontWeight: 'bold',
-                              backgroundColor: motionStatus.bgColor,
-                              color: motionStatus.color,
-                              border: `1px solid ${motionStatus.color}40`
-                            }}>
-                              {motionStatus.status}
-                            </span>
-                          </td>
-
-
-                          {/* 転倒検知 */}
+                          {/* 室内検知 */}
                           <td style={{
                             padding: '12px 16px',
                             textAlign: 'center',
@@ -866,7 +848,26 @@ export default function Dashboard() {
                             </span>
                           </td>
 
-                          {/* バス判定 */}
+                          {/* 転倒検知 */}
+                          <td style={{
+                            padding: '12px 16px',
+                            textAlign: 'center',
+                            borderRight: '1px solid #dee2e6'
+                          }}>
+                            <span style={{
+                              padding: '4px 12px',
+                              borderRadius: '20px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              backgroundColor: motionStatus.bgColor,
+                              color: motionStatus.color,
+                              border: `1px solid ${motionStatus.color}40`
+                            }}>
+                              {motionStatus.status}
+                            </span>
+                          </td>
+
+                          {/* バス内検知 */}
                           <td style={{
                             padding: '12px 16px',
                             textAlign: 'center',
@@ -883,6 +884,21 @@ export default function Dashboard() {
                             }}>
                               {busStatus.status}
                             </span>
+                          </td>
+
+                          {/* 温度 */}
+                          <td style={{
+                            padding: '12px 16px',
+                            textAlign: 'center',
+                            borderRight: '1px solid #dee2e6'
+                          }}>
+                            <div style={{
+                              fontSize: '16px',
+                              fontWeight: 'bold',
+                              color: '#333'
+                            }}>
+                              {temperatureDisplay}
+                            </div>
                           </td>
 
                           {/* 最新BLE */}
@@ -1003,7 +1019,7 @@ export default function Dashboard() {
                 beacons={beacons}
                 selectedBeacon={selectedBeacon}
                 onSelectedBeaconChange={handleSelectedBeaconChange}
-                rssiThreshold={calculatedRssiThreshold}
+                rssiThreshold={rssiThreshold}
                 onRssiThresholdChange={handleRssiThresholdChange}
                 alertThreshold={alertThreshold}
                 onAlertThresholdChange={handleAlertThresholdChange}
