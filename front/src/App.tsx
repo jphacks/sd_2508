@@ -135,7 +135,7 @@ function NavBar({ onLogout }: { onLogout: () => void }) {
         ダッシュボード
       </Link>
       <Link to="/management" className={`nav-link ${isActive('/management') ? 'active' : ''}`}>
-        デバイス管理
+        デバイス登録
       </Link>
       <Link to="/calibration" className={`nav-link ${isActive('/calibration') ? 'active' : ''}`}>
         キャリブレーション

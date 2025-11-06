@@ -261,7 +261,7 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
   }
 
   return (
-    <div className="container" style={{ maxWidth: '1400px' }}>
+    <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
         機能3: 屋外GPS追跡
       </h1>

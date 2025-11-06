@@ -686,7 +686,7 @@ export default function Dashboard() {
               marginBottom: '20px',
               color: '#333'
             }}>
-              登録トラッカー状態一覧 ({devices.length}台)
+              登録ユーザーの状態一覧
             </h2>
 
             {devices.length > 0 ? (

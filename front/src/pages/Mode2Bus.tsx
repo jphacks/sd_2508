@@ -875,7 +875,7 @@ export default function Mode2Bus({
               fontWeight: '600', 
               color: '#333' 
             }}>
-              バス内判定RSSI閾値: {rssiThreshold}dBm
+              バス内判定閾値: {rssiThreshold}dBm
             </label>
             <input
               type="range"
