@@ -6,9 +6,7 @@ import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition 
 import { 
   collection, 
   getDocs,
-  doc,
   getDoc,
-  updateDoc, 
   where 
 } from 'firebase/firestore';
 import { ref, onValue, update, get } from 'firebase/database';
@@ -18,6 +16,19 @@ import { db, rtdb } from '../firebase';
 import Mode1Indoor from './Mode1Indoor';
 import Mode2Bus from './Mode2Bus';
 import Mode3GPS from './Mode3GPS';
+
+const createJstTimestamp = () => {
+  const now = new Date();
+  const jstOffsetMinutes = 9 * 60;
+  const jstTime = new Date(now.getTime() + jstOffsetMinutes * 60 * 1000);
+  const year = jstTime.getUTCFullYear();
+  const month = String(jstTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(jstTime.getUTCDate()).padStart(2, '0');
+  const hours = String(jstTime.getUTCHours()).padStart(2, '0');
+  const minutes = String(jstTime.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(jstTime.getUTCSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+09:00`;
+};
 
 export default function Dashboard() {
   // === 基本状態管理 ===
@@ -73,21 +84,12 @@ export default function Dashboard() {
   // 🔧 Firebase更新用のヘルパー関数を追加
   const updateBusStatusInFirebase = useCallback(async (deviceId: string, devEUI: string, isInBus: boolean) => {
     try {
-      const [deviceDocRef, statusRef] = [
-        doc(db, 'devices', deviceId),
-        ref(rtdb, `devices/${devEUI.toLowerCase()}/status`)
-      ];
+      const statusRef = ref(rtdb, `devices/${devEUI.toLowerCase()}/status`);
 
-      await Promise.all([
-        updateDoc(deviceDocRef, {
-          'status.inBus': isInBus,
-          'status.busStatusUpdatedAt': new Date().toISOString()
-        }),
-        update(statusRef, {
-          inBus: isInBus,
-          busStatusUpdatedAt: new Date().toISOString()
-        })
-      ]);
+      await update(statusRef, {
+        inBus: isInBus,
+        busStatusUpdatedAt: createJstTimestamp()
+      });
 
       console.log(`✅ ${deviceId}: バス状態更新完了 (${isInBus ? 'バス内' : 'バス外'})`);
     } catch (error) {
@@ -179,37 +181,27 @@ export default function Dashboard() {
     await updateBusStatusForAllDevices(overrideBusRange, overrideSelectedBeacon);
   }, [updateBusStatusForAllDevices]);
 
+  const triggerBusStatusUpdateRef = useRef(triggerBusStatusUpdate);
+  useEffect(() => {
+    triggerBusStatusUpdateRef.current = triggerBusStatusUpdate;
+  }, [triggerBusStatusUpdate]);
+
   // === 設定変更のハンドラー関数 ===
   const handleSelectedBeaconChange = useCallback(async (beaconId: string) => {
     console.log('🎯 ビーコン変更:', beaconId);
     setSelectedBeacon(beaconId);
-    
-    // 🔧 新しい値を直接渡して即座更新
-    if (beaconId && devices.length > 0) {
-      setTimeout(() => triggerBusStatusUpdate(undefined, beaconId), 200); // 遅延を短縮
-    }
-  }, [devices.length, triggerBusStatusUpdate]);
+  }, [setSelectedBeacon]);
 
   const handleBusRangeChange = useCallback(async (range: number) => {
     setBusRange(range);
     console.log('📐 バス有効範囲変更:', range, 'm', '→ RSSI:', distanceToRssi(range), 'dBm');
-    
-    // 🔧 範囲変更時に即座にバス状態を更新
-    if (selectedBeacon && devices.length > 0) {
-      setTimeout(() => triggerBusStatusUpdate(), 500); // 少し遅延させて安定化
-    }
-  }, [distanceToRssi, selectedBeacon, devices.length, triggerBusStatusUpdate]);
+  }, [distanceToRssi]);
 
 
   const handleAlertThresholdChange = useCallback(async (threshold: number) => {
     setAlertThreshold(threshold);
     console.log('⏰ 警告時間変更:', threshold);
-    
-    // 🔧 警告時間は判定に影響しないが、一応更新
-    if (selectedBeacon && devices.length > 0) {
-      setTimeout(() => triggerBusStatusUpdate(), 500);
-    }
-  }, [selectedBeacon, devices.length, triggerBusStatusUpdate]);
+  }, []);
 
 
   const handleAlertEnabledChange = useCallback((enabled: boolean) => {
@@ -242,18 +234,7 @@ export default function Dashboard() {
     console.log('📶 RSSI閾値変更:', threshold, 'dBm', '→ 推定範囲:', estimatedRange.toFixed(1), 'm', '→ 実際設定:', newRange, 'm');
     
     setBusRange(newRange);
-    
-    // 🔧 新しい値を直接渡して即座更新
-    if (selectedBeacon && devices.length > 0) {
-      console.log('🔄 RSSI閾値変更による即座更新実行');
-      setTimeout(async () => {
-        if (selectedBeacon && devices.length > 0) {
-          await triggerBusStatusUpdate(newRange, undefined);
-          console.log('✅ RSSI閾値変更による更新完了');
-        }
-      }, 200); // busRangeの更新を待つため短縮
-    }
-  }, [estimateDistance, selectedBeacon, devices.length, triggerBusStatusUpdate]);
+  }, [estimateDistance, setBusRange]);
 
 
 
@@ -345,11 +326,11 @@ export default function Dashboard() {
           // Status監視
           const statusRef = ref(rtdb, `devices/${normalizedDevEUI}/status`);
           const unsubStatus = onValue(statusRef, (snapshot) => {
-            if (snapshot.exists()) {
-              const status = snapshot.val();
-              setDevices(prev => prev.map(d => 
-                d.devEUI === device.devEUI ? { ...d, statusData: status, lastUpdate: new Date() } : d
-              ));
+          if (snapshot.exists()) {
+            const status = snapshot.val();
+            setDevices(prev => prev.map(d => 
+              d.devEUI === device.devEUI ? { ...d, statusData: status, lastUpdate: new Date() } : d
+            ));
             }
           });
 
@@ -393,8 +374,11 @@ export default function Dashboard() {
                     };
                   });
 
+                let shouldTriggerUpdate = false;
+
                 // 🔧 前回のBLEデータと比較して、実際に変化があった場合のみ更新
                 setDevices(prev => {
+                  let hasDeviceChanged = false;
                   const updatedDevices = prev.map(d => {
                     if (d.devEUI === device.devEUI) {
                       const prevBleData = d.bleData || [];
@@ -405,25 +389,25 @@ export default function Dashboard() {
                       
                       if (hasRealChange) {
                         console.log(`📶 ${device.name}: BLE実データ変更検出`);
+                        hasDeviceChanged = true;
                         return { ...d, bleData, lastUpdate: new Date() };
                       }
                       return d;
                     }
                     return d;
                   });
-                  
-                  return updatedDevices;
+
+                  if (hasDeviceChanged) {
+                    shouldTriggerUpdate = true;
+                    return updatedDevices;
+                  }
+
+                  return prev;
                 });
 
-                // 🔧 BLE受信時の更新を削除（定期更新と設定変更時のみに限定）
-                // if (currentMode === 'bus' && selectedBeacon && bleData.length > 0) {
-                //   console.log(`📶 ${device.name}: BLE受信により状態更新をトリガー`);
-                //   setTimeout(() => {
-                //     if (currentMode === 'bus') {
-                //       triggerBusStatusUpdate();
-                //     }
-                //   }, 500);
-                // }
+                if (shouldTriggerUpdate && triggerBusStatusUpdateRef.current) {
+                  triggerBusStatusUpdateRef.current();
+                }
               }
             }
           });
@@ -447,25 +431,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  useEffect(() => {
-    if (currentMode === 'bus' && selectedBeacon && devices.length > 0) {
-      console.log('🚌 バスモードでの定期更新開始');
-      
-      // 初回実行
-      setTimeout(() => triggerBusStatusUpdate(), 1000);
-      
-      // 30秒ごとの定期更新
-      const interval = setInterval(() => {
-        triggerBusStatusUpdate();
-      }, 30000);
-      
-      return () => {
-        clearInterval(interval);
-        console.log('🚌 バスモード定期更新停止');
-      };
-    }
-  }, [currentMode, selectedBeacon, devices.length, triggerBusStatusUpdate]);
-
+  // 定期的なバス状態更新は廃止し、BLE計測の変化のみで更新する
 
   // 状態計算関数
   const getIndoorStatus = (device: Device) => {

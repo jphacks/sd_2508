@@ -5,6 +5,19 @@ import { ref, update, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { Device, Beacon } from '../types';
 
+const createJstTimestamp = () => {
+  const now = new Date();
+  const jstOffsetMinutes = 9 * 60;
+  const jstTime = new Date(now.getTime() + jstOffsetMinutes * 60 * 1000);
+  const year = jstTime.getUTCFullYear();
+  const month = String(jstTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(jstTime.getUTCDate()).padStart(2, '0');
+  const hours = String(jstTime.getUTCHours()).padStart(2, '0');
+  const minutes = String(jstTime.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(jstTime.getUTCSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}+09:00`;
+};
+
 interface Mode2Props {
   devices?: Device[];
   beacons?: Beacon[];
@@ -112,7 +125,7 @@ export default function Mode2Bus({
 
       await update(statusRef, {
         inBus: isInBus,
-        busStatusUpdatedAt: new Date().toISOString()
+        busStatusUpdatedAt: createJstTimestamp()
       });
     } catch (error) {
       console.error(`バス状態更新エラー (${deviceId}):`, error);
