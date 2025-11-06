@@ -627,9 +627,6 @@ export default function Mode2Bus({
 
   return (
     <div style={{ 
-      padding: '24px', 
-      backgroundColor: '#f8f9fa',
-      minHeight: '100vh',
       maxWidth: '1400px',
       margin: '0 auto'
     }}>

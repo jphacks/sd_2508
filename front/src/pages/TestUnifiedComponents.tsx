@@ -968,46 +968,58 @@ export default function Dashboard() {
             )}
           </div>
 
-          <ModeSelector
-            currentMode={currentMode}
-            onModeChange={handleModeChange}
-            modeConfigs={modeConfigs}
-          />
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '16px',
+            padding: '32px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+            border: '1px solid #e1e8ed'
+          }}>
+            <ModeSelector
+              currentMode={currentMode}
+              onModeChange={handleModeChange}
+              modeConfigs={modeConfigs}
+            />
 
-          {currentMode === 'indoor' && (
-            <div>
-              <Mode1Indoor devices={devices} />
-            </div>
-          )}
+            <div style={{
+              marginTop: '32px'
+            }}>
+              {currentMode === 'indoor' && (
+                <div>
+                  <Mode1Indoor devices={devices} />
+                </div>
+              )}
 
-          {currentMode === 'bus' && (
-            <div>
-              <Mode2Bus 
-                devices={devices} 
-                beacons={beacons}
-                selectedBeacon={selectedBeacon}
-                onSelectedBeaconChange={handleSelectedBeaconChange}
-                rssiThreshold={rssiThreshold}
-                onRssiThresholdChange={handleRssiThresholdChange}
-                alertThreshold={alertThreshold}
-                onAlertThresholdChange={handleAlertThresholdChange}
-                alertEnabled={alertEnabled}
-                onAlertEnabledChange={handleAlertEnabledChange}
-                connectionTimeout={connectionTimeout}
-                onConnectionTimeoutChange={handleConnectionTimeoutChange}
-                showAllDevices={showAllDevices}
-                onShowAllDevicesChange={handleShowAllDevicesChange}
-                busRange={busRange}
-                onBusRangeChange={handleBusRangeChange}
-              />
-            </div>
-          )}
+              {currentMode === 'bus' && (
+                <div>
+                  <Mode2Bus 
+                    devices={devices} 
+                    beacons={beacons}
+                    selectedBeacon={selectedBeacon}
+                    onSelectedBeaconChange={handleSelectedBeaconChange}
+                    rssiThreshold={rssiThreshold}
+                    onRssiThresholdChange={handleRssiThresholdChange}
+                    alertThreshold={alertThreshold}
+                    onAlertThresholdChange={handleAlertThresholdChange}
+                    alertEnabled={alertEnabled}
+                    onAlertEnabledChange={handleAlertEnabledChange}
+                    connectionTimeout={connectionTimeout}
+                    onConnectionTimeoutChange={handleConnectionTimeoutChange}
+                    showAllDevices={showAllDevices}
+                    onShowAllDevicesChange={handleShowAllDevicesChange}
+                    busRange={busRange}
+                    onBusRangeChange={handleBusRangeChange}
+                  />
+                </div>
+              )}
 
-          {currentMode === 'gps' && (
-            <div>
-              <Mode3GPS devices={devices} />
+              {currentMode === 'gps' && (
+                <div>
+                  <Mode3GPS devices={devices} />
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </ErrorBoundary>

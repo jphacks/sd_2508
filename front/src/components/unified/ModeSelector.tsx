@@ -121,7 +121,7 @@ export default function ModeSelector({
           fontSize: '14px',
           color: '#666'
         }}>
-          詳細を見たいモードを選択してください
+          詳細を見たい機能を選択してください
         </p>
       </div>
 
