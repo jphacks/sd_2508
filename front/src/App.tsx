@@ -75,7 +75,8 @@ function App() {
         </header>
 
         <Routes>
-          <Route path="/" element={<Dashboard currentMode={currentMode} setCurrentMode={setCurrentMode} />} />
+          {/* <Route path="/" element={<Dashboard currentMode={currentMode} setCurrentMode={setCurrentMode} />} /> */}
+          <Route path="/" element={<TestUnifiedComponents />} />
           <Route path="/mode1" element={<Mode1Indoor />} />
           <Route path="/mode2" element={<Mode2Bus />} />
           <Route path="/mode3" element={<Mode3GPS />} />

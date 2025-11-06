@@ -976,7 +976,7 @@ export default function Mode2Bus({
                 border: '1px solid #C8E6C9'
               }}>
                 <p style={{ margin: '0 0 4px 0', fontWeight: 'bold', color: '#2E7D32' }}>
-                  ✅ 選択中: {beacons.find(b => b.id === selectedBeacon)?.name}
+                  選択中: {beacons.find(b => b.id === selectedBeacon)?.name}
                 </p>
                 <p style={{ margin: 0, color: '#666' }}>
                   MAC: {beacons.find(b => b.id === selectedBeacon)?.mac || '未設定'}
@@ -1025,7 +1025,7 @@ export default function Mode2Bus({
                 step={0.5}
               />
               <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                📶 対応RSSI: {rssiThreshold}dBm以上でバス内と判定
+                対応RSSI: {rssiThreshold}dBm以上でバス内と判定
               </div>
             </div>
           ) : (
@@ -1067,7 +1067,7 @@ export default function Mode2Bus({
                 step={5}
               />
               <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                📐 推定範囲: 約{estimateDistance(rssiThreshold).toFixed(1)}m以内
+                推定範囲: 約{estimateDistance(rssiThreshold).toFixed(1)}m以内
               </div>
             </div>
           )}
@@ -1113,7 +1113,7 @@ export default function Mode2Bus({
           {[
             { label: '置き去り警告', value: alertEnabled, handler: handleAlertEnabledChange },
             { label: '警告音', value: alertSound, handler: handleAlertSoundChange },
-            { label: '全デバイス表示', value: showAllDevices, handler: handleShowAllDevicesChange }
+            // { label: '全デバイス表示', value: showAllDevices, handler: handleShowAllDevicesChange }
           ].map(({ label, value, handler }) => (
             <div key={label}>
               <label style={{ 
@@ -1173,7 +1173,7 @@ export default function Mode2Bus({
               cursor: 'pointer'
             }}
           >
-            🔊 警告音をテスト
+            警告音をテスト
           </button>
 
           {/* 現在の設定状況を表示 */}

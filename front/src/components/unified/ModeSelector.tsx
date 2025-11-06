@@ -21,7 +21,7 @@ export default function ModeSelector({
     const details = {
       indoor: {
         shortName: '室内',
-        fullName: '室内追跡',
+        fullName: '室内検知',
         features: ['BLEビーコン', '位置推定', '退室検知'],
         requirement: 'ビーコン設置が必要'
       },
@@ -53,8 +53,6 @@ export default function ModeSelector({
     if (disabled || !isModeAvailable(mode) || mode === currentMode) {
       return;
     }
-    
-    console.log(`🔄 モード切り替え: ${currentMode} → ${mode}`);
     onModeChange(mode);
   };
 
@@ -124,7 +122,7 @@ export default function ModeSelector({
           fontWeight: 'bold',
           color: '#333'
         }}>
-          🎯 動作モード選択
+          動作モード選択
         </h3>
         <p style={{
           margin: 0,

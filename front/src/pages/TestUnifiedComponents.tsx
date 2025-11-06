@@ -260,22 +260,22 @@ export default function Dashboard() {
   // === モード設定 ===
   const modeConfigs: Record<Mode, ModeConfig> = {
     indoor: {
-      title: '室内追跡',
+      title: '部屋退出検知',
       description: 'BLEビーコンを使用した室内位置推定',
       color: '#4A90E2',
-      icon: '🏠'
+      icon: ''
     },
     bus: {
-      title: 'バス監視',
+      title: 'バス置き去り検知',
       description: 'バス内での置き去り防止システム',
       color: '#FF9800',
-      icon: '🚌'
+      icon: ''
     },
     gps: {
-      title: 'GPS追跡',
+      title: '屋外はぐれ検知',
       description: '屋外での高精度位置追跡',
       color: '#4CAF50',
-      icon: '🌍'
+      icon: ''
     }
   };
 
@@ -593,6 +593,62 @@ export default function Dashboard() {
     }
   };
 
+    // 🔧 GPS状態判定関数を追加
+  const getGPSStatus = (device: Device) => {
+    if (!device.position) {
+      return { 
+        status: 'GPS未取得', 
+        color: '#6c757d', 
+        bgColor: '#e9ecef'
+      };
+    }
+
+    try {
+      const { lat, lon, timestamp } = device.position;
+      
+      // GPS座標の有効性チェック
+      if (typeof lat !== 'number' || typeof lon !== 'number' || 
+          lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        return { 
+          status: 'GPS未取得', 
+          color: '#6c757d', 
+          bgColor: '#e9ecef'
+        };
+      }
+
+      // タイムスタンプの確認
+      let updateTime: Date | null = null;
+      if (timestamp) {
+        updateTime = new Date(timestamp);
+        if (isNaN(updateTime.getTime())) {
+          updateTime = null;
+        }
+      }
+
+      // 🔧 2種類のパラメータのみ
+      if (timestamp) {
+        return {
+          status: 'GPS取得済み',
+          color: '#155724',
+          bgColor: '#d4edda'
+        };
+      } else {
+        return {
+          status: 'GPS未取得',
+          color: '#6c757d',
+          bgColor: '#e9ecef'
+        };
+      }
+    } catch (error) {
+      console.error('GPS状態判定エラー:', error);
+      return { 
+        status: 'GPS未取得', 
+        color: '#6c757d', 
+        bgColor: '#e9ecef'
+      };
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
@@ -646,7 +702,7 @@ export default function Dashboard() {
             fontSize: '28px',
             fontWeight: 'bold'
           }}>
-            📱 統合デバイス監視ダッシュボード
+            mimoca トラッカー管理ダッシュボード
           </h1>
 
           <ModeSelector
@@ -655,7 +711,7 @@ export default function Dashboard() {
             modeConfigs={modeConfigs}
           />
 
-          {/* 🔧 デバイス状態表示テーブルを復元 */}
+          {/* デバイス状態表示テーブルを復元 */}
           <div style={{
             backgroundColor: 'white',
             borderRadius: '12px',
@@ -669,7 +725,7 @@ export default function Dashboard() {
               marginBottom: '20px',
               color: '#333'
             }}>
-              📊 登録トラッカー状態一覧 ({devices.length}台)
+              登録トラッカー状態一覧 ({devices.length}台)
             </h2>
 
             {devices.length > 0 ? (
@@ -706,7 +762,7 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '100px'
                       }}>
-                        🌡️ 温度
+                        温度
                       </th>
                       <th style={{
                         padding: '12px 16px',
@@ -716,7 +772,7 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '100px'
                       }}>
-                        🏠 位置
+                        転倒検知
                       </th>
                       <th style={{
                         padding: '12px 16px',
@@ -726,7 +782,7 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '100px'
                       }}>
-                        🚶 転倒検知
+                        室内検知
                       </th>
                       <th style={{
                         padding: '12px 16px',
@@ -736,9 +792,9 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '120px'
                       }}>
-                        🚌 バス判定
+                        バス内検知
                       </th>
-                      <th style={{
+                      {/* <th style={{
                         padding: '12px 16px',
                         textAlign: 'center',
                         fontWeight: 'bold',
@@ -747,7 +803,7 @@ export default function Dashboard() {
                         minWidth: '120px'
                       }}>
                         📶 最新BLE
-                      </th>
+                      </th> */}
                       <th style={{
                         padding: '12px 16px',
                         textAlign: 'center',
@@ -755,7 +811,7 @@ export default function Dashboard() {
                         color: '#495057',
                         minWidth: '150px'
                       }}>
-                        🕒 最終更新
+                        GPS情報
                       </th>
                     </tr>
                   </thead>
@@ -765,6 +821,7 @@ export default function Dashboard() {
                       const temperatureDisplay = getTemperatureDisplay(device);
                       const motionStatus = getMotionStatus(device);
                       const busStatus = getBusStatus(device);
+                      const gpsStatus = getGPSStatus(device);
                       const latestBleData = device.bleData?.find(ble => ble && ble.beaconId === selectedBeacon);
 
                       return (
@@ -788,15 +845,15 @@ export default function Dashboard() {
                               color: '#666',
                               fontFamily: 'monospace'
                             }}>
-                              ID: {device.deviceId}
+                              {device.deviceId}
                             </div>
-                            <div style={{
+                            {/* <div style={{
                               fontSize: '12px',
                               color: '#666',
                               fontFamily: 'monospace'
                             }}>
                               devEUI: {device.devEUI}
-                            </div>
+                            </div> */}
                           </td>
 
                           {/* 温度 */}
@@ -825,13 +882,14 @@ export default function Dashboard() {
                               borderRadius: '20px',
                               fontSize: '12px',
                               fontWeight: 'bold',
-                              backgroundColor: indoorStatus.bgColor,
-                              color: indoorStatus.color,
-                              border: `1px solid ${indoorStatus.color}40`
+                              backgroundColor: motionStatus.bgColor,
+                              color: motionStatus.color,
+                              border: `1px solid ${motionStatus.color}40`
                             }}>
-                              {indoorStatus.status}
+                              {motionStatus.status}
                             </span>
                           </td>
+
 
                           {/* 転倒検知 */}
                           <td style={{
@@ -844,11 +902,11 @@ export default function Dashboard() {
                               borderRadius: '20px',
                               fontSize: '12px',
                               fontWeight: 'bold',
-                              backgroundColor: motionStatus.bgColor,
-                              color: motionStatus.color,
-                              border: `1px solid ${motionStatus.color}40`
+                              backgroundColor: indoorStatus.bgColor,
+                              color: indoorStatus.color,
+                              border: `1px solid ${indoorStatus.color}40`
                             }}>
-                              {motionStatus.status}
+                              {indoorStatus.status}
                             </span>
                           </td>
 
@@ -872,7 +930,7 @@ export default function Dashboard() {
                           </td>
 
                           {/* 最新BLE */}
-                          <td style={{
+                          {/* <td style={{
                             padding: '12px 16px',
                             textAlign: 'center',
                             borderRight: '1px solid #dee2e6'
@@ -894,20 +952,46 @@ export default function Dashboard() {
                                 未受信
                               </span>
                             )}
-                          </td>
-
-                          {/* 最終更新 */}
-                          {/* <td style={{
-                            padding: '12px 16px',
-                            textAlign: 'center'
-                          }}>
-                            <div style={{ fontSize: '12px' }}>
-                              {device.lastUpdate.toLocaleDateString('ja-JP')}
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#666' }}>
-                              {device.lastUpdate.toLocaleTimeString('ja-JP')}
-                            </div>
                           </td> */}
+
+                          {/* GPS */}
+                          <td style={{
+                            padding: '12px 16px',
+                            textAlign: 'center',
+                            borderRight: '1px solid #dee2e6'
+                          }}>
+                            <div>
+                              <span style={{
+                              padding: '6px 16px',
+                              borderRadius: '20px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              backgroundColor: gpsStatus.bgColor,
+                              color: gpsStatus.color,
+                              border: `1px solid ${gpsStatus.color}40`,
+                              display: 'inline-block'
+                              }}>
+                                {gpsStatus.status}
+                              </span>
+                              
+                              {/* {gpsStatus.coordinates && (
+                                <>
+                                  <div style={{ fontSize: '11px', color: '#333', fontFamily: 'monospace' }}>
+                                    {gpsStatus.coordinates.lat}
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#333', fontFamily: 'monospace' }}>
+                                    {gpsStatus.coordinates.lon}
+                                  </div>
+                                </>
+                              )}
+                              
+                              {gpsStatus.lastUpdate && (
+                                <div style={{ fontSize: '10px', color: 'black' }}>
+                                  {gpsStatus.lastUpdate.toLocaleTimeString('ja-JP')}
+                                </div>
+                              )} */}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}

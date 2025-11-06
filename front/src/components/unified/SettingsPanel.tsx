@@ -308,7 +308,7 @@ function IndoorSettings({
         alignItems: 'center',
         gap: '8px'
       }}>
-        🏠 室内追跡設定
+        室内検知設定
       </h4>
 
       {/* 部屋選択 */}
@@ -435,7 +435,7 @@ function BusSettings({
         alignItems: 'center',
         gap: '8px'
       }}>
-        🚌 バス検知設定
+        バス検知設定
       </h4>
 
       {/* バスビーコン選択 */}
@@ -552,7 +552,7 @@ function GPSSettings({
         alignItems: 'center',
         gap: '8px'
       }}>
-        🌍 GPS追跡設定
+        GPS追跡設定
       </h4>
 
       {/* 親トラッカー選択 */}
