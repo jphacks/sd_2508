@@ -35,18 +35,8 @@ export function estimatePositionByFingerprinting(
   }
 
   const normalizeMac = (mac: string) => mac.toUpperCase().replace(/:/g, '');
-<<<<<<< HEAD
   const MISSING_SIGNAL_LEVEL = -100; // 未検出ビーコンの補完値
   const SIMILARITY_DECAY = 0.15; // 類似度計算時の距離スケール調整係数
-=======
-  const MISSING_SIGNAL_LEVEL = -100;
-  const SIMILARITY_DECAY = 0.15;
-
-  console.log('Fingerprinting開始:', {
-    currentRssiKeys: Object.keys(currentRssi),
-    calibrationPointsCount: calibrationPoints.length
-  });
->>>>>>> taichi
 
   // 現在のRSSIを正規化済みのキーへ揃える
   const normalizedCurrent: { [beaconMac: string]: number } = {};
@@ -57,11 +47,6 @@ export function estimatePositionByFingerprinting(
     normalizedCurrent[normalizeMac(mac)] = value;
   });
 
-<<<<<<< HEAD
-=======
-  console.log('🔍 正規化された現在RSSI:', normalizedCurrent);
-
->>>>>>> taichi
   const beaconSet = new Set<string>();
   Object.keys(normalizedCurrent).forEach(mac => beaconSet.add(mac));
 
@@ -70,7 +55,6 @@ export function estimatePositionByFingerprinting(
     .map(point => {
       const aggregates = new Map<string, { sum: number; count: number }>();
 
-<<<<<<< HEAD
       point.measurements.forEach(measurement => {
         if (!measurement?.rssiValues) {
           return;
@@ -98,76 +82,21 @@ export function estimatePositionByFingerprinting(
         beaconSet.add(mac);
       });
 
-=======
-      console.log(`🔍 CalibrationPoint処理: ${point.label}`, {
-        measurementsCount: point.measurements?.length || 0,
-        position: point.position
-      });
-
-      if (!point.measurements || point.measurements.length === 0) {
-        console.warn(`⚠️ ${point.label}: 測定データがありません`);
-        return null;
-      }
-
-      point.measurements.forEach(measurement => {
-        if (!measurement?.rssiValues) {
-          return;
-        }
-
-        Object.entries(measurement.rssiValues).forEach(([mac, value]) => {
-          if (typeof value !== 'number' || Number.isNaN(value)) {
-            return;
-          }
-          const normalizedMac = normalizeMac(mac);
-          const stats = aggregates.get(normalizedMac) || { sum: 0, count: 0 };
-          stats.sum += value;
-          stats.count += 1;
-          aggregates.set(normalizedMac, stats);
-          beaconSet.add(normalizedMac);
-        });
-      });
-
-      if (aggregates.size === 0) {
-        console.warn(`⚠️ ${point.label}: 有効なRSSIデータがありません`);
-        return null;
-      }
-
-      const averagedRssi: { [mac: string]: number } = {};
-      aggregates.forEach((stats, mac) => {
-        averagedRssi[mac] = stats.sum / Math.max(stats.count, 1);
-      });
-
-      console.log(`✅ ${point.label}: 平均RSSI`, averagedRssi);
->>>>>>> taichi
       return { point, averagedRssi };
     })
     .filter((item): item is { point: CalibrationPoint; averagedRssi: { [mac: string]: number } } => item !== null);
 
   if (processedPoints.length === 0) {
-<<<<<<< HEAD
-=======
-    console.warn('⚠️ 有効なCalibrationPointsがありません');
->>>>>>> taichi
     return null;
   }
 
   const beaconKeys = Array.from(beaconSet);
   if (beaconKeys.length === 0) {
-<<<<<<< HEAD
     return null;
   }
 
   // 類似度の計算
   // 各キャリブレーションポイントとの類似度を計算（ユークリッド距離の逆数）
-=======
-    console.warn('⚠️ 共通ビーコンがありません');
-    return null;
-  }
-
-  console.log('🔍 使用可能ビーコン:', beaconKeys);
-
-  // 類似度の計算
->>>>>>> taichi
   const similarities = processedPoints.map(({ point, averagedRssi }) => {
     let sumSquaredDiff = 0;
     const featureCount = beaconKeys.length;
@@ -183,23 +112,12 @@ export function estimatePositionByFingerprinting(
       return { point, similarity: 0 };
     }
 
-<<<<<<< HEAD
     // 平均二乗誤差 (RMS) を距離とする
     const euclideanDistance = Math.sqrt(sumSquaredDiff / featureCount);
 
     // 距離を指数関数で類似度に変換（スケール調整済み）
     const similarity = Math.exp(-SIMILARITY_DECAY * euclideanDistance);
 
-=======
-    const euclideanDistance = Math.sqrt(sumSquaredDiff / featureCount);
-    const similarity = Math.exp(-SIMILARITY_DECAY * euclideanDistance);
-
-    console.log(`🔍 ${point.label}: 類似度計算`, {
-      euclideanDistance: euclideanDistance.toFixed(2),
-      similarity: similarity.toFixed(4)
-    });
-
->>>>>>> taichi
     return { point, similarity };
   });
 
