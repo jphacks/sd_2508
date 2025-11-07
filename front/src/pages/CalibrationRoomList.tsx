@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { RoomProfile } from '../types';
+import TemperatureThresholdSettings from '../components/TemperatureThresholdSettings';
 
 export default function CalibrationRoomList() {
   const navigate = useNavigate();
@@ -181,26 +182,35 @@ export default function CalibrationRoomList() {
                           使用中
                         </span>
                       ) : (
-                        <span style={{
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          fontSize: '12px',
-                          backgroundColor: '#F8F9FA',
-                          color: '#6C757D'
-                        }}>
+                        <button
+                          onClick={() => setActiveRoom(room.id)}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                            backgroundColor: '#F8F9FA',
+                            color: '#6C757D',
+                            border: '1px solid #E1E8ED',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            fontWeight: 'normal'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#E3F2FD';
+                            e.currentTarget.style.color = '#1976D2';
+                            e.currentTarget.style.borderColor = '#1976D2';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#F8F9FA';
+                            e.currentTarget.style.color = '#6C757D';
+                            e.currentTarget.style.borderColor = '#E1E8ED';
+                          }}
+                        >
                           未使用
-                        </span>
+                        </button>
                       )}
                     </td>
                     <td style={{ padding: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {!isActive && (
-                        <button
-                          className="btn btn-primary btn-compact"
-                          onClick={() => setActiveRoom(room.id)}
-                        >
-                          有効化
-                        </button>
-                      )}
                       <button
                         className="btn btn-outline btn-compact"
                         onClick={() => navigate(`/edit-room/${room.id}`)}
@@ -228,6 +238,8 @@ export default function CalibrationRoomList() {
           </table>
         </div>
       </div>
+
+      <TemperatureThresholdSettings />
 
       <div className="card" style={{ marginTop: '24px' }}>
         <h3 style={{ marginBottom: '16px' }}>💡 使い方</h3>

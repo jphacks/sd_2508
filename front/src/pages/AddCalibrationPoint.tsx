@@ -81,6 +81,42 @@ export default function AddCalibrationPoint() {
     }
   }, [mode, room]);
 
+  // 座標変換の共通関数
+  const getRoomScale = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !room) return { scale: 1, padding: 40, roomWidth: 10, roomHeight: 8 };
+    
+    const padding = 40;
+    const width = canvas.width - padding * 2;
+    const height = canvas.height - padding * 2;
+    
+    const roomWidth = room.outline?.width || 10;
+    const roomHeight = room.outline?.height || 8;
+    const scaleX = width / roomWidth;
+    const scaleY = height / roomHeight;
+    const scale = Math.min(scaleX, scaleY);
+    
+    return { scale, padding, roomWidth, roomHeight };
+  };
+
+  // 正規化座標からキャンバス座標への変換
+  const normalizedToCanvas = (normX: number, normY: number) => {
+    const { scale, padding, roomWidth, roomHeight } = getRoomScale();
+    return {
+      x: padding + normX * roomWidth * scale,
+      y: padding + normY * roomHeight * scale
+    };
+  };
+
+  // キャンバス座標から正規化座標への変換
+  const canvasToNormalized = (canvasX: number, canvasY: number) => {
+    const { scale, padding, roomWidth, roomHeight } = getRoomScale();
+    return {
+      x: (canvasX - padding) / (roomWidth * scale),
+      y: (canvasY - padding) / (roomHeight * scale)
+    };
+  };
+
   const loadRoom = async () => {
     if (!roomId) return;
     
@@ -122,13 +158,7 @@ export default function AddCalibrationPoint() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const padding = 40;
-    const width = canvas.width - padding * 2;
-    const height = canvas.height - padding * 2;
-    
-    const scaleX = width / (room.outline?.width || 10);
-    const scaleY = height / (room.outline?.height || 8);
-    const scale = Math.min(scaleX, scaleY);
+    const { scale, padding, roomWidth, roomHeight } = getRoomScale();
 
     // クリア
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -143,51 +173,45 @@ export default function AddCalibrationPoint() {
     ctx.strokeRect(
       padding,
       padding,
-      (room.outline?.width || 10) * scale,
-      (room.outline?.height || 8) * scale
+      roomWidth * scale,
+      roomHeight * scale
     );
 
     // 家具を描画
     if (room.furniture) {
       room.furniture.forEach(item => {
-        const roomWidth = room.outline?.width || 10;
-        const roomHeight = room.outline?.height || 8;
-        const x = padding + item.position.x * roomWidth * scale;
-        const y = padding + item.position.y * roomHeight * scale;
+        const pos = normalizedToCanvas(item.position.x, item.position.y);
         const w = item.width * roomWidth * scale;
         const h = item.height * roomHeight * scale;
 
         ctx.fillStyle = '#95a5a6';
-        ctx.fillRect(x, y, w, h);
+        ctx.fillRect(pos.x, pos.y, w, h);
         ctx.strokeStyle = '#7f8c8d';
         ctx.lineWidth = 1;
-        ctx.strokeRect(x, y, w, h);
+        ctx.strokeRect(pos.x, pos.y, w, h);
 
         // 家具タイプのラベル
         ctx.fillStyle = '#2c3e50';
         ctx.font = '12px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(item.type, x + w / 2, y + h / 2 + 4);
+        ctx.fillText(item.type, pos.x + w / 2, pos.y + h / 2 + 4);
       });
     }
 
     // 既存のキャリブレーション点を描画
     room.calibrationPoints.forEach(point => {
-      const roomWidth = room.outline?.width || 10;
-      const roomHeight = room.outline?.height || 8;
-      const x = padding + point.position.x * roomWidth * scale;
-      const y = padding + point.position.y * roomHeight * scale;
+      const pos = normalizedToCanvas(point.position.x, point.position.y);
       
       // 再測定モードで選択されているポイントはハイライト
       if (mode === 'remeasure' && selectedPointId === point.id) {
         ctx.fillStyle = '#e74c3c';
         ctx.beginPath();
-        ctx.arc(x, y, 10, 0, 2 * Math.PI);
+        ctx.arc(pos.x, pos.y, 10, 0, 2 * Math.PI);
         ctx.fill();
       } else {
         ctx.fillStyle = '#3498db';
         ctx.beginPath();
-        ctx.arc(x, y, 6, 0, 2 * Math.PI);
+        ctx.arc(pos.x, pos.y, 6, 0, 2 * Math.PI);
         ctx.fill();
       }
       
@@ -195,47 +219,41 @@ export default function AddCalibrationPoint() {
       ctx.fillStyle = '#2c3e50';
       ctx.font = '11px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(point.label, x, y - 12);
+      ctx.fillText(point.label, pos.x, pos.y - 12);
     });
 
     // ドア位置の描画
     if (doorPosition) {
-      const roomWidth = room.outline?.width || 10;
-      const roomHeight = room.outline?.height || 8;
-      const x = padding + doorPosition.x * roomWidth * scale;
-      const y = padding + doorPosition.y * roomHeight * scale;
+      const pos = normalizedToCanvas(doorPosition.x, doorPosition.y);
       
       ctx.fillStyle = mode === 'door_position' ? '#f39c12' : '#9b59b6';
       ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.arc(pos.x, pos.y, 8, 0, 2 * Math.PI);
       ctx.fill();
       
       ctx.fillStyle = '#2c3e50';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('🚪', x, y + 4);
+      ctx.fillText('🚪', pos.x, pos.y + 4);
     }
 
     // 選択された位置を描画（新規追加モード、ドア内外測定モード）
     if (selectedPosition && (mode === 'new' || mode === 'door_inside' || mode === 'door_outside')) {
-      const roomWidth = room.outline?.width || 10;
-      const roomHeight = room.outline?.height || 8;
-      const x = padding + selectedPosition.x * roomWidth * scale;
-      const y = padding + selectedPosition.y * roomHeight * scale;
+      const pos = normalizedToCanvas(selectedPosition.x, selectedPosition.y);
       
       ctx.fillStyle = '#e74c3c';
       ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.arc(pos.x, pos.y, 8, 0, 2 * Math.PI);
       ctx.fill();
       
       // 十字マーク
       ctx.strokeStyle = '#e74c3c';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(x - 12, y);
-      ctx.lineTo(x + 12, y);
-      ctx.moveTo(x, y - 12);
-      ctx.lineTo(x, y + 12);
+      ctx.moveTo(pos.x - 12, pos.y);
+      ctx.lineTo(pos.x + 12, pos.y);
+      ctx.moveTo(pos.x, pos.y - 12);
+      ctx.lineTo(pos.x, pos.y + 12);
       ctx.stroke();
 
       // ラベル
@@ -244,7 +262,7 @@ export default function AddCalibrationPoint() {
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
         const label = mode === 'door_inside' ? 'ドア内' : mode === 'door_outside' ? 'ドア外' : pointLabel;
-        ctx.fillText(label, x, y - 15);
+        ctx.fillText(label, pos.x, pos.y - 15);
       }
     }
   };
@@ -254,37 +272,30 @@ export default function AddCalibrationPoint() {
     if (!canvas || !room) return;
 
     const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
-
-    const padding = 40;
-    const width = canvas.width - padding * 2;
-    const height = canvas.height - padding * 2;
+    // キャンバスの実際の表示サイズと論理サイズの比率を計算
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
     
-    const roomWidth = room.outline?.width || 10;
-    const roomHeight = room.outline?.height || 8;
-    const scaleX = width / roomWidth;
-    const scaleY = height / roomHeight;
-    const scale = Math.min(scaleX, scaleY);
+    // クリック位置をキャンバスの論理座標に変換
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top) * scaleY;
 
-    // クリック位置を正規化座標に変換
-    const normalizedX = (clickX - padding) / scale / roomWidth;
-    const normalizedY = (clickY - padding) / scale / roomHeight;
+    // 共通の座標変換関数を使用して正規化座標に変換
+    const normalized = canvasToNormalized(clickX, clickY);
 
     // 部屋の範囲内かチェック
-    if (normalizedX >= 0 && normalizedX <= 1 &&
-        normalizedY >= 0 && normalizedY <= 1) {
+    if (normalized.x >= 0 && normalized.x <= 1 &&
+        normalized.y >= 0 && normalized.y <= 1) {
       
       if (mode === 'new' || mode === 'door_inside' || mode === 'door_outside') {
-        setSelectedPosition({ x: normalizedX, y: normalizedY });
+        setSelectedPosition({ x: normalized.x, y: normalized.y });
       } else if (mode === 'door_position') {
-        setDoorPosition({ x: normalizedX, y: normalizedY });
+        setDoorPosition({ x: normalized.x, y: normalized.y });
       } else if (mode === 'remeasure') {
         // 既存のポイントをクリックで選択
         const clickedPoint = room.calibrationPoints.find(point => {
-          const px = padding + point.position.x * roomWidth * scale;
-          const py = padding + point.position.y * roomHeight * scale;
-          const distance = Math.sqrt(Math.pow(clickX - px, 2) + Math.pow(clickY - py, 2));
+          const pointPos = normalizedToCanvas(point.position.x, point.position.y);
+          const distance = Math.sqrt(Math.pow(clickX - pointPos.x, 2) + Math.pow(clickY - pointPos.y, 2));
           return distance < 15; // 15px以内ならクリックと判定
         });
         
@@ -308,12 +319,6 @@ export default function AddCalibrationPoint() {
       return;
     }
 
-    // ドア内側・外側の測定時はラベル不要
-    if (mode !== 'door_inside' && mode !== 'door_outside' && !pointLabel.trim()) {
-      alert('測定ポイントのラベルを入力してください');
-      return;
-    }
-
     setIsScanning(true);
     
     // RTDBから該当トラッカーのデータを監視
@@ -322,30 +327,24 @@ export default function AddCalibrationPoint() {
     const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
     trackerRefRef.current = trackerRef;
     
-    console.log('📍 測定開始:', { selectedDevice, normalizedDeviceId, path: `devices/${normalizedDeviceId}` });
     
     // 測定開始時のタイムスタンプを記録
     let initialTimestamp: string | null = null;
     
     const listener = onValue(trackerRef, (snapshot) => {
       const data = snapshot.val();
-      console.log('📡 RTDB更新検知:', { data, timestamp: data?.beaconsUpdatedAt });
       
       if (data && data.beacons) {
         const currentTimestamp = data.beaconsUpdatedAt;
-        console.log('⏰ タイムスタンプ比較:', { initialTimestamp, currentTimestamp, isNew: currentTimestamp !== initialTimestamp });
         
         // 初回の呼び出しでタイムスタンプを記録
         if (initialTimestamp === null) {
           initialTimestamp = currentTimestamp;
-          console.log('✅ 初回タイムスタンプ記録:', initialTimestamp);
           return;
         }
         
         // タイムスタンプが更新されたら新しいデータと判定
         if (currentTimestamp !== initialTimestamp) {
-          console.log('🎯 新しいデータ検知！測定完了');
-          
           // 各ビーコンからRSSI値を取得
           const rssiMap: { [beaconId: string]: number } = {};
           
@@ -356,9 +355,6 @@ export default function AddCalibrationPoint() {
               rssiMap[normalizedMac] = beacon.rssi;
             }
           });
-          
-          console.log('📊 取得したRSSI値:', rssiMap);
-          
           setCurrentMeasurement({
             deviceId: selectedDevice,
             timestamp: currentTimestamp,
@@ -375,7 +371,7 @@ export default function AddCalibrationPoint() {
           }
         }
       } else {
-        console.log('⚠️ beaconsデータが見つかりません', data);
+        console.warn('⚠️ beaconsデータが見つかりません', data);
       }
     }, (error) => {
       console.error('❌ RTDB読み込みエラー:', error);
@@ -386,7 +382,7 @@ export default function AddCalibrationPoint() {
 
     // 5分後にタイムアウト
     const timeout = setTimeout(() => {
-      console.log('⏱️ 測定がタイムアウト');
+      console.warn('⏱️ 測定がタイムアウト');
       setIsScanning(false);
       if (trackerRefRef.current) {
         off(trackerRefRef.current);
@@ -400,7 +396,6 @@ export default function AddCalibrationPoint() {
   };
 
   const cancelMeasurement = () => {
-    console.log('❌ 測定をキャンセル');
     setIsScanning(false);
     
     if (trackerRefRef.current) {
@@ -428,21 +423,21 @@ export default function AddCalibrationPoint() {
 
       if (mode === 'new') {
         // 新規キャリブレーション点を追加
-        if (!selectedPosition || !pointLabel.trim()) {
-          alert('位置とラベルを設定してください');
+        if (!selectedPosition) {
+          alert('位置を設定してください');
           return;
         }
 
         const newPoint: CalibrationPoint = {
           id: `custom-${Date.now()}`,
           position: { x: selectedPosition.x, y: selectedPosition.y },
-          label: pointLabel.trim(),
+          label: pointLabel.trim() || `ポイント ${updatedPoints.length + 1}`,
           measurements: [currentMeasurement]
         };
 
         updatedPoints.push(newPoint);
       } else if (mode === 'remeasure') {
-        // 既存のキャリブレーション点に測定を追加
+        // 既存のキャリブレーション点に測定を追加（ラベルは既存のものを使用）
         if (!selectedPointId) {
           alert('再測定するポイントを選択してください');
           return;
@@ -712,20 +707,6 @@ export default function AddCalibrationPoint() {
           </div>
         )}
 
-        {/* 新規追加モードのラベル入力 */}
-        {mode === 'new' && (
-          <div className="form-group">
-            <label className="form-label">測定ポイントのラベル *</label>
-            <input
-              type="text"
-              className="form-input"
-              placeholder="例: テーブル横、窓際、入口付近"
-              value={pointLabel}
-              onChange={(e) => setPointLabel(e.target.value)}
-            />
-          </div>
-        )}
-
         {/* 測定関連のUI（ドア位置変更モード以外） */}
         {mode !== 'door_position' && (
           <>
@@ -754,7 +735,6 @@ export default function AddCalibrationPoint() {
                     isScanning || 
                     !selectedDevice || 
                     !selectedPosition || 
-                    (mode === 'new' && !pointLabel.trim()) ||
                     (mode === 'remeasure' && !selectedPointId)
                   }
                 >
@@ -811,7 +791,6 @@ export default function AddCalibrationPoint() {
         {mode === 'new' && (
           <ol style={{ paddingLeft: '20px', lineHeight: '1.8' }}>
             <li>マップ上で測定したい位置をクリックして選択します</li>
-            <li>測定ポイントのラベル（名前）を入力します</li>
             <li>測定に使用するトラッカーを選択します</li>
             <li>選択した位置にトラッカーを持って移動します</li>
             <li>「ここで測定」ボタンをクリックします（最大1分待機）</li>

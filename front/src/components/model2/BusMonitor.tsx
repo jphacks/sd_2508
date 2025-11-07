@@ -89,8 +89,6 @@ export default function BusMonitor({
 
   // === バス監視の初期化 ===
   const initializeBusMonitoring = () => {
-    console.log('バス監視システム初期化:', busInfo.name);
-    
     // 新しい運行記録を開始
     if (busInfo.isRunning && !currentJourney) {
       startNewJourney();
@@ -118,7 +116,6 @@ export default function BusMonitor({
     };
     
     setCurrentJourney(newJourney);
-    console.log('新しい運行開始:', newJourney.id);
   };
 
   // === 乗客状態の更新 ===
@@ -290,8 +287,6 @@ export default function BusMonitor({
     setIsCheckingPassengers(true);
     setSystemStatus('checking');
     
-    console.log('発車前安全確認開始');
-    
     // 30秒のカウントダウン
     setDepartureCountdown(30);
     
@@ -318,8 +313,6 @@ export default function BusMonitor({
     
     // 🔥 修正: 乗車中のみカウント
     const finalPassengers = passengers.filter(p => p.status === 'onboard');
-    
-    console.log(`発車確認完了: ${finalPassengers.length}名乗車`);
     
     // 発車記録
     if (currentJourney) {

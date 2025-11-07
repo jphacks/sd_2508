@@ -124,12 +124,6 @@ export function estimatePositionByFingerprinting(
   // 類似度でソート
   similarities.sort((a, b) => b.similarity - a.similarity);
 
-  console.log('🔍 類似度順位:', similarities.map(s => ({
-    label: s.point.label,
-    similarity: s.similarity.toFixed(4),
-    position: s.point.position
-  })));
-
   // 上位3つの点で重み付け平均（k-NN法、k=3）
   const k = Math.min(3, similarities.length);
   let totalWeight = 0;
@@ -154,7 +148,6 @@ export function estimatePositionByFingerprinting(
     confidence: similarities[0].similarity
   };
 
-  console.log('✅ Fingerprinting結果:', result);
   return result;
 }
 
@@ -356,18 +349,12 @@ export function estimatePositionHybrid(
   referenceRssi: number = -59
 ): { x: number; y: number; confidence: number; method: string } | null {
   
-  console.log('🧮 ハイブリッド位置推定開始:', {
-    currentRssiKeys: Object.keys(currentRssi),
-    calibrationPointsCount: calibrationPoints.length
-  });
-
   // 🔥 重要: beaconIdをMACアドレスに変換
   const macBasedRssi: { [mac: string]: number } = {};
   
   Object.entries(currentRssi).forEach(([beaconId, rssi]) => {
     // beaconIdからMACアドレスを取得する必要がある
     // これはMode1Indoorで適切に変換されているか確認が必要
-    console.log(`🔍 RSSI変換: ${beaconId} -> RSSI: ${rssi}`);
     macBasedRssi[beaconId] = rssi; // 一時的にbeaconIdをそのまま使用
   });
 

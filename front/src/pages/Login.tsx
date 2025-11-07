@@ -3,9 +3,13 @@ import { auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 
-function Login() {
+interface LoginProps {
+  error?: string;
+}
+
+function Login({ error: initialError = '' }: LoginProps) {
   const navigate = useNavigate();
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<string>(initialError);
   const [loading, setLoading] = useState(false);
 
   const handleGoogleLogin = async () => {

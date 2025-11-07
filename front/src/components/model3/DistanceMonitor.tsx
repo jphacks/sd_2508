@@ -401,9 +401,9 @@ export default function DistanceMonitor({
 
     const getTrendIcon = () => {
       switch (status.trend) {
-        case 'approaching': return '🔴 接近中';
-        case 'distancing': return '🟢 離れ中';
-        default: return '🟡 安定';
+        case 'approaching': return '接近中';
+        case 'distancing': return '離れ中';
+        default: return '安定';
       }
     };
 
@@ -532,7 +532,7 @@ export default function DistanceMonitor({
               fontWeight: 'bold',
               color: alert.alertLevel === 'danger' ? '#e74c3c' : '#f39c12'
             }}>
-              {alert.alertLevel === 'danger' ? '🚨 危険アラート' : '⚠️ 警告アラート'}
+              {alert.alertLevel === 'danger' ? '危険アラート' : '警告アラート'}
             </div>
             <div style={{ fontSize: '12px', color: '#666' }}>
               {status?.deviceName} - {alert.lastDistance.toFixed(1)}m
@@ -582,8 +582,8 @@ export default function DistanceMonitor({
             継続時間: {Math.floor(duration / 60)}分{duration % 60}秒
           </span>
           <span>
-            {alert.acknowledged ? '✅ 確認済み' : '⏰ 未確認'}
-            {alert.escalated && ' | 🔺 エスカレート'}
+            {alert.acknowledged ? '確認済み' : '未確認'}
+            {alert.escalated && ' | エスカレート'}
           </span>
         </div>
       </div>
@@ -600,7 +600,7 @@ export default function DistanceMonitor({
         marginBottom: '16px'
       }}>
         <h3 style={{ margin: 0, fontSize: '18px' }}>
-          📏 距離監視ダッシュボード
+          距離監視ダッシュボード
         </h3>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
@@ -614,7 +614,7 @@ export default function DistanceMonitor({
               cursor: 'pointer'
             }}
           >
-            ⚙️ 設定
+            設定
           </button>
           <button
             onClick={isMonitoring ? stopMonitoring : startMonitoring}
@@ -628,7 +628,7 @@ export default function DistanceMonitor({
               cursor: 'pointer'
             }}
           >
-            {isMonitoring ? '⏹️ 停止' : '▶️ 開始'}
+            {isMonitoring ? '停止' : '開始'}
           </button>
         </div>
       </div>
@@ -654,26 +654,26 @@ export default function DistanceMonitor({
           <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#e74c3c' }}>
             {Object.values(activeAlerts).length}
           </div>
-          <div style={{ fontSize: '10px', color: '#666' }}>アクティブアラート</div>
+          <div style={{ fontSize: '10px', color: '#666' }}>アラート</div>
         </div>
         
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#f39c12' }}>
             {Object.values(distanceStatuses).filter(s => s.alertLevel === 'warning').length}
           </div>
-          <div style={{ fontSize: '10px', color: '#666' }}>警告状態</div>
+          <div style={{ fontSize: '10px', color: '#666' }}>警告</div>
         </div>
         
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#27ae60' }}>
             {Object.values(distanceStatuses).filter(s => s.alertLevel === 'safe').length}
           </div>
-          <div style={{ fontSize: '10px', color: '#666' }}>安全状態</div>
+          <div style={{ fontSize: '10px', color: '#666' }}>安全</div>
         </div>
         
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#666' }}>
-            {isMonitoring ? '🟢 監視中' : '🔴 停止中'}
+            {isMonitoring ? '監視中' : '停止中'}
           </div>
           <div style={{ fontSize: '10px', color: '#666' }}>
             {isMonitoring ? `${settings.trackingInterval}秒間隔` : '手動'}
@@ -684,7 +684,7 @@ export default function DistanceMonitor({
       {/* 設定パネル */}
       {showSettings && (
         <div className="card" style={{ marginBottom: '16px' }}>
-          <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>⚙️ 監視設定</h4>
+          <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>監視設定</h4>
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -804,7 +804,7 @@ export default function DistanceMonitor({
       {Object.keys(activeAlerts).length > 0 && (
         <div className="card" style={{ marginBottom: '16px' }}>
           <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#e74c3c' }}>
-            🚨 アクティブアラート ({Object.keys(activeAlerts).length})
+            アラート ({Object.keys(activeAlerts).length})
           </h4>
           {Object.values(activeAlerts).map(renderActiveAlert)}
         </div>
@@ -813,7 +813,7 @@ export default function DistanceMonitor({
       {/* 距離監視ゲージ */}
       <div className="card">
         <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>
-          📊 リアルタイム距離状況
+          リアルタイム距離状況
         </h4>
         {Object.keys(distanceStatuses).length === 0 ? (
           <div style={{

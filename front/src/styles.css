@@ -473,6 +473,23 @@ canvas {
   height: 100%;
 }
 
+/* マーカーツールチップのスタイル */
+.marker-tooltip {
+  background-color: rgba(44, 62, 80, 0.95);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px !important;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.marker-tooltip::before {
+  border-top-color: rgba(44, 62, 80, 0.95);
+}
+
 /* ローディング */
 .loading {
   display: flex;
