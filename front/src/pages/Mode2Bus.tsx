@@ -25,8 +25,6 @@ interface Mode2Props {
   onSelectedBeaconChange?: (beaconId: string) => void;
   rssiThreshold?: number;
   onRssiThresholdChange?: (threshold: number) => void;
-  alertThreshold?: number;
-  onAlertThresholdChange?: (threshold: number) => void;
   alertEnabled?: boolean;
   onAlertEnabledChange?: (enabled: boolean) => void;
   connectionTimeout?: number;
@@ -53,8 +51,6 @@ export default function Mode2Bus({
   onSelectedBeaconChange,
   rssiThreshold: externalRssiThreshold,
   onRssiThresholdChange,
-  alertThreshold: externalAlertThreshold,
-  onAlertThresholdChange,
   alertEnabled: externalAlertEnabled,
   onAlertEnabledChange,
   connectionTimeout: externalConnectionTimeout,
@@ -72,8 +68,6 @@ export default function Mode2Bus({
   
   // 内部制御用の状態
   const [internalSelectedBeacon, setInternalSelectedBeacon] = useState<string>('');
-  const [alertMessage, setAlertMessage] = useState<string | null>(null);
-  const [internalAlertThreshold, setInternalAlertThreshold] = useState(3);
   const [internalAlertEnabled, setInternalAlertEnabled] = useState(true);
   const [internalRssiThreshold, setInternalRssiThreshold] = useState(-75);
   const [internalConnectionTimeout, setInternalConnectionTimeout] = useState(10);
@@ -128,7 +122,6 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
   // 実際に使用する値を決定
   const selectedBeacon = isExternallyControlled ? externalSelectedBeacon || '' : internalSelectedBeacon;
   const rssiThreshold = isExternallyControlled ? externalRssiThreshold || -75 : internalRssiThreshold;
-  const alertThreshold = isExternallyControlled ? externalAlertThreshold || 3 : internalAlertThreshold;
   const alertEnabled = true;  // 🔧 常に有効に固定
   const connectionTimeout = isExternallyControlled ? externalConnectionTimeout || 10 : internalConnectionTimeout;
   const showAllDevices = isExternallyControlled ? externalShowAllDevices || false : internalShowAllDevices;
@@ -175,7 +168,6 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
 
     try {
       const currentTime = new Date();
-      const thresholdMs = alertThreshold * 60 * 1000;
 
       const devicesInBus = devices.filter(device => {
         if (!device.bleData || !Array.isArray(device.bleData)) return false;
@@ -211,35 +203,10 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
       });
 
       await Promise.all(updatePromises);
-
-      // 警告ロジック（既存のまま、effectiveSelectedBeaconとeffectiveRssiThresholdを使用）
-      if (devicesInBus.length === 1) {
-        const aloneDevice = devicesInBus[0];
-        const latestBleData = aloneDevice.bleData?.find(ble => ble.beaconId === effectiveSelectedBeacon);
-        
-        if (latestBleData) {
-          const aloneStartTime = new Date(latestBleData.timestamp);
-          const aloneTime = currentTime.getTime() - aloneStartTime.getTime();
-          
-          if (aloneTime >= thresholdMs) {
-            const distance = estimateDistance(latestBleData.rssi);
-            const message = `${aloneDevice.name} がバスに置き去りにされている可能性があります！
-
-推定距離: ${distance.toFixed(1)}m
-信号強度: ${latestBleData.rssi}dBm
-単独検知時間: ${Math.floor(aloneTime / 60000)}分
-判定基準: RSSI ${effectiveRssiThreshold}dBm以上をバス内と判定`;
-            
-            setAlertMessage(message);
-          }
-        }
-      } else {
-        setAlertMessage(null);
-      }
     } catch (error) {
-      console.error('❌ 置き去り検知処理エラー:', error);
+      console.error('❌ バス内判定処理エラー:', error);
     }
-  }, [rssiThreshold, selectedBeacon, alertThreshold, alertEnabled, devices, estimateDistance, updateBusStatusInFirebase]);
+  }, [rssiThreshold, selectedBeacon, alertEnabled, devices, estimateDistance, updateBusStatusInFirebase]);
 
   // === 設定変更ハンドラー ===
   const handleSelectedBeaconChange = useCallback((value: string) => {
@@ -300,14 +267,6 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
       }
     }
   }, [onBusRangeChange, selectedBeacon, devices.length, checkForAloneDevicesThrottled, distanceToRssi]);
-
-  const handleAlertThresholdChange = useCallback((value: number) => {
-    if (onAlertThresholdChange) {
-      onAlertThresholdChange(value);
-    } else {
-      setInternalAlertThreshold(value);
-    }
-  }, [onAlertThresholdChange]);
 
   const handleAlertEnabledChange = useCallback((value: boolean) => {
     if (onAlertEnabledChange) {
@@ -620,51 +579,6 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
     <div style={{ 
       maxWidth: '1400px', margin: '0 auto'}}>
       {/* 機能見出しは不要のため削除 */}
-      
-      {/* 警告メッセージ */}
-      {alertMessage && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          backgroundColor: '#fff3cd',
-          border: '1px solid #ffeaa7',
-          borderRadius: '8px',
-          padding: '16px',
-          maxWidth: '400px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          zIndex: 1000
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '8px'
-          }}>
-            <strong style={{ color: '#856404' }}>警告</strong>
-            <button
-              onClick={() => setAlertMessage(null)}
-              style={{
-                background: 'none',
-                border: 'none',
-                fontSize: '18px',
-                cursor: 'pointer',
-                color: '#856404'
-              }}
-            >
-              ×
-            </button>
-          </div>
-          <div style={{ 
-            color: '#856404', 
-            fontSize: '14px',
-            whiteSpace: 'pre-line',
-            lineHeight: '1.4'
-          }}>
-            {alertMessage}
-          </div>
-        </div>
-      )}
 
       <div style={{ 
         display: 'grid', 
@@ -862,29 +776,6 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
               min={-150}
               max={-30}
               step={5}
-            />
-          </div>
-
-          {/* 警告時間設定 */}
-          <div>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '8px', 
-              fontWeight: '600', 
-              color: '#333' 
-            }}>
-              警告までの時間: {alertThreshold}分
-            </label>
-            <input
-              type="range"
-              style={{
-                width: '100%',
-                marginBottom: '8px'
-              }}
-              value={alertThreshold}
-              onChange={(e) => handleAlertThresholdChange(Number(e.target.value))}
-              min={1}
-              max={10}
             />
           </div>
 
