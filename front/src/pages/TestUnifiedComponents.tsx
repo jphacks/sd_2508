@@ -2,12 +2,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ModeSelector from '../components/unified/ModeSelector';
 import ErrorBoundary from '../components/common/ErrorBoundary';
-import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition } from '../types';
+import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition, TemperatureThresholdSettings } from '../types';
 import { 
   collection, 
   getDocs,
   getDoc,
-  where 
+  where,
+  doc as firestoreDoc
 } from 'firebase/firestore';
 import { ref, onValue, update, get } from 'firebase/database';
 import { db, rtdb } from '../firebase';
@@ -40,6 +41,9 @@ export default function Dashboard() {
   const [maxDistance] = useState<number>(50);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 🌡️ 温度閾値設定
+  const [temperatureThreshold, setTemperatureThreshold] = useState<number>(28);
 
   // 🔧 バス監視設定を追加（範囲ベース）
   const [busRange, setBusRange] = useState(5); // メートル単位
@@ -281,6 +285,14 @@ export default function Dashboard() {
       try {
         console.log('📱 データ読み込み開始...');
         
+        // 🌡️ 温度閾値を読み込み
+        const tempThresholdDoc = await getDoc(firestoreDoc(db, 'settings', 'temperature-thresholds'));
+        if (tempThresholdDoc.exists()) {
+          const tempSettings = tempThresholdDoc.data() as TemperatureThresholdSettings;
+          setTemperatureThreshold(tempSettings.highTempThreshold || 28);
+          console.log('🌡️ 温度閾値を読み込みました:', tempSettings.highTempThreshold);
+        }
+        
         // ビーコンデータを読み込み
         const beaconsSnapshot = await getDocs(collection(db, 'beacons'));
         const beaconsData = beaconsSnapshot.docs.map(doc => {
@@ -461,9 +473,15 @@ export default function Dashboard() {
 
   const getTemperatureDisplay = (device: Device) => {
     if (!device.statusData || typeof device.statusData.temperature_c !== 'number') {
-      return '不明';
+      return { display: '不明', temperature: null, isHighTemp: false };
     }
-    return `${device.statusData.temperature_c.toFixed(1)}°C`;
+    const temp = device.statusData.temperature_c;
+    const isHighTemp = temp > temperatureThreshold;
+    return { 
+      display: `${temp.toFixed(1)}°C`, 
+      temperature: temp,
+      isHighTemp: isHighTemp
+    };
   };
 
   const getMotionStatus = (device: Device) => {
@@ -900,14 +918,15 @@ export default function Dashboard() {
                           <td style={{
                             padding: '12px 16px',
                             textAlign: 'center',
-                            borderRight: '1px solid #dee2e6'
+                            borderRight: '1px solid #dee2e6',
+                            backgroundColor: temperatureDisplay.isHighTemp ? '#ffebee' : 'transparent'
                           }}>
                             <div style={{
                               fontSize: '16px',
                               fontWeight: 'bold',
-                              color: '#333'
+                              color: temperatureDisplay.isHighTemp ? '#c62828' : '#333'
                             }}>
-                              {temperatureDisplay}
+                              {temperatureDisplay.display}
                             </div>
                           </td>
 

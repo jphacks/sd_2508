@@ -259,6 +259,12 @@ export interface Mode3Config {
   calibrated: boolean;
 }
 
+// 温度閾値設定
+export interface TemperatureThresholdSettings {
+  highTempThreshold: number; // 高温警告の閾値（デフォルト28度）
+  lowTempThreshold?: number; // 低温警告の閾値（オプション）
+}
+
 export interface AppConfig {
   currentMode: AppMode;
   mode1?: Mode1Config;

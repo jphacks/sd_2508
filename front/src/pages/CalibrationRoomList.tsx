@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { RoomProfile } from '../types';
+import TemperatureThresholdSettings from '../components/TemperatureThresholdSettings';
 
 export default function CalibrationRoomList() {
   const navigate = useNavigate();
@@ -237,6 +238,8 @@ export default function CalibrationRoomList() {
           </table>
         </div>
       </div>
+
+      <TemperatureThresholdSettings />
 
       <div className="card" style={{ marginTop: '24px' }}>
         <h3 style={{ marginBottom: '16px' }}>💡 使い方</h3>
