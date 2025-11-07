@@ -86,14 +86,14 @@ export default function TrackerList({
             return { 
               status: 'weak', 
               text: 'バス外(近)', 
-              color: '#FF9800',
+              color: '#4CAF50',
               detail: `RSSI: ${latestBle.rssi}dBm (弱い)`
             };
           }
           return { 
             status: 'inactive', 
             text: 'バス外', 
-            color: '#F44336',
+            color: '#4CAF50',
             detail: `RSSI: ${latestBle.rssi}dBm (圏外)`
           };
         }

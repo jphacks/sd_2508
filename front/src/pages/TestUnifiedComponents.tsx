@@ -52,6 +52,7 @@ export default function Dashboard() {
   const [alertEnabled, setAlertEnabled] = useState(true);
   const [connectionTimeout, setConnectionTimeout] = useState(10);
   const [showAllDevices, setShowAllDevices] = useState(false);
+  const [busDeviceAlertThreshold, setBusDeviceAlertThreshold] = useState(1); // バス内デバイス数の警告閾値
 
   // 🔧 RSSI から距離を推定する関数
   const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): number => {
@@ -473,7 +474,10 @@ export default function Dashboard() {
     }
   };
 
-  const getBusStatus = (device: Device) => {
+  const getBusStatus = (device: Device, busDeviceCount: number) => {
+
+    // 🔧 警告条件: バス内デバイス数が閾値以下の場合
+    const shouldAlert = busDeviceCount <= busDeviceAlertThreshold;
 
     // 1. Mode2Busと同じローカルBLE判定を最優先で実行
     if (!selectedBeacon) {
@@ -497,15 +501,15 @@ export default function Dashboard() {
             if (isWithinBusRange) {
               return {
                 status: 'バス内',
-                color: '#155724',
-                bgColor: '#d4edda'
+                color: shouldAlert ? '#721c24' : '#155724',
+                bgColor: shouldAlert ? '#f8d7da' : '#d4edda'
               };
             }
 
             return {
               status: 'バス外',
-              color: '#721c24',
-              bgColor: '#f8d7da'
+              color: '#155724',
+              bgColor: '#d4edda'
             };
           }
 
@@ -529,9 +533,13 @@ export default function Dashboard() {
 
           if (timeSinceUpdate < 5 * 60 * 1000) {
             if (isInBus) {
-              return { status: 'バス内', color: '#155724', bgColor: '#d4edda' };
+              return { 
+                status: 'バス内', 
+                color: shouldAlert ? '#721c24' : '#155724', 
+                bgColor: shouldAlert ? '#f8d7da' : '#d4edda' 
+              };
             }
-            return { status: 'バス外', color: '#721c24', bgColor: '#f8d7da' };
+            return { status: 'バス外', color: '#155724', bgColor: '#d4edda' };
           }
         } catch (error) {
           console.error('バス状態の時刻確認エラー:', error);
@@ -671,7 +679,7 @@ export default function Dashboard() {
                 <table style={{
                   width: '100%',
                   borderCollapse: 'collapse',
-                  fontSize: '14px',
+                  fontSize: '17px',
                   minWidth: '1000px'
                 }}>
                   <thead>
@@ -750,13 +758,38 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {devices.map((device, index) => {
-                      const indoorStatus = getIndoorStatus(device);
-                      const temperatureDisplay = getTemperatureDisplay(device);
-                      const motionStatus = getMotionStatus(device);
-                      const busStatus = getBusStatus(device);
-                      const gpsStatus = getGPSStatus(device);
-                      const latestBleData = device.bleData?.find(ble => ble && ble.beaconId === selectedBeacon);
+                    {(() => {
+                      // 🔧 バス内デバイス数を一度だけ計算
+                      const busDeviceCount = devices.filter(d => {
+                        if (!selectedBeacon) return false;
+                        
+                        const latestBle = d.bleData?.find(ble =>
+                          ble && ble.beaconId === selectedBeacon && typeof ble.rssi === 'number'
+                        );
+
+                        if (latestBle) {
+                          try {
+                            const bleTimestamp = new Date(latestBle.timestamp);
+                            if (!isNaN(bleTimestamp.getTime())) {
+                              const timeSinceLastBle = Date.now() - bleTimestamp.getTime();
+                              const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
+                              const isWithinBusRange = latestBle.rssi >= calculatedRssiThreshold;
+                              return isRecentlyReceived && isWithinBusRange;
+                            }
+                          } catch (error) {
+                            return false;
+                          }
+                        }
+                        return false;
+                      }).length;
+
+                      return devices.map((device, index) => {
+                        const indoorStatus = getIndoorStatus(device);
+                        const temperatureDisplay = getTemperatureDisplay(device);
+                        const motionStatus = getMotionStatus(device);
+                        const busStatus = getBusStatus(device, busDeviceCount);
+                        const gpsStatus = getGPSStatus(device);
+                        const latestBleData = device.bleData?.find(ble => ble && ble.beaconId === selectedBeacon);
                       
                       // 経過時間を計算
                       const getTimeAgo = (date: Date | null) => {
@@ -789,7 +822,7 @@ export default function Dashboard() {
                             <div style={{ marginBottom: '4px' }}>
                               <span style={{ fontWeight: 'bold' }}>{device.name}</span>
                               <span style={{
-                                fontSize: '12px',
+                                fontSize: '15px',
                                 color: '#666',
                                 fontFamily: 'monospace',
                                 marginLeft: '8px'
@@ -798,7 +831,7 @@ export default function Dashboard() {
                               </span>
                             </div>
                             <div style={{
-                              fontSize: '11px',
+                              fontSize: '14px',
                               color: '#999'
                             }}>
                               {device.lastUpdate ? (
@@ -821,7 +854,7 @@ export default function Dashboard() {
                             <span style={{
                               padding: '4px 12px',
                               borderRadius: '20px',
-                              fontSize: '12px',
+                              fontSize: '15px',
                               fontWeight: 'bold',
                               backgroundColor: indoorStatus.bgColor,
                               color: indoorStatus.color,
@@ -840,7 +873,7 @@ export default function Dashboard() {
                             <span style={{
                               padding: '4px 12px',
                               borderRadius: '20px',
-                              fontSize: '12px',
+                              fontSize: '15px',
                               fontWeight: 'bold',
                               backgroundColor: motionStatus.bgColor,
                               color: motionStatus.color,
@@ -859,7 +892,7 @@ export default function Dashboard() {
                             <span style={{
                               padding: '4px 12px',
                               borderRadius: '20px',
-                              fontSize: '12px',
+                              fontSize: '15px',
                               fontWeight: 'bold',
                               backgroundColor: busStatus.bgColor,
                               color: busStatus.color,
@@ -877,7 +910,7 @@ export default function Dashboard() {
                             backgroundColor: temperatureDisplay.isHighTemp ? '#ffebee' : 'transparent'
                           }}>
                             <div style={{
-                              fontSize: '16px',
+                              fontSize: '19px',
                               fontWeight: 'bold',
                               color: temperatureDisplay.isHighTemp ? '#c62828' : '#333'
                             }}>
@@ -895,7 +928,7 @@ export default function Dashboard() {
                               <span style={{
                               padding: '6px 16px',
                               borderRadius: '20px',
-                              fontSize: '12px',
+                              fontSize: '15px',
                               fontWeight: 'bold',
                               backgroundColor: gpsStatus.bgColor,
                               color: gpsStatus.color,
@@ -925,7 +958,7 @@ export default function Dashboard() {
                           </td>
                         </tr>
                       );
-                    })}
+                    })})()}
                   </tbody>
                 </table>
               </div>
@@ -983,6 +1016,8 @@ export default function Dashboard() {
                     onShowAllDevicesChange={handleShowAllDevicesChange}
                     busRange={busRange}
                     onBusRangeChange={handleBusRangeChange}
+                    busDeviceAlertThreshold={busDeviceAlertThreshold}
+                    onBusDeviceAlertThresholdChange={setBusDeviceAlertThreshold}
                   />
                 </div>
               )}

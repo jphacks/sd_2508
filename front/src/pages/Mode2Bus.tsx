@@ -35,6 +35,8 @@ interface Mode2Props {
   onShowAllDevicesChange?: (show: boolean) => void;
   busRange?: number;
   onBusRangeChange?: (range: number) => void;
+  busDeviceAlertThreshold?: number;
+  onBusDeviceAlertThresholdChange?: (threshold: number) => void;
 }
 
 interface DeviceWithConnection extends Device {
@@ -60,7 +62,9 @@ export default function Mode2Bus({
   showAllDevices: externalShowAllDevices,
   onShowAllDevicesChange,
   busRange: externalBusRange,
-  onBusRangeChange
+  onBusRangeChange,
+  busDeviceAlertThreshold: externalBusDeviceAlertThreshold,
+  onBusDeviceAlertThresholdChange
 }: Mode2Props = {}) {
   // === 基本状態管理 ===
   const [devices, setDevices] = useState<Device[]>(externalDevices || []);
@@ -75,6 +79,7 @@ export default function Mode2Bus({
   const [internalConnectionTimeout, setInternalConnectionTimeout] = useState(10);
   const [internalShowAllDevices, setInternalShowAllDevices] = useState(false);
   const [internalBusRange, setInternalBusRange] = useState(5);
+  const [internalBusDeviceAlertThreshold, setInternalBusDeviceAlertThreshold] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
 
   // 参照値
@@ -111,6 +116,7 @@ export default function Mode2Bus({
   const connectionTimeout = isExternallyControlled ? externalConnectionTimeout || 10 : internalConnectionTimeout;
   const showAllDevices = isExternallyControlled ? externalShowAllDevices || false : internalShowAllDevices;
   const busRange = isExternallyControlled ? externalBusRange || 5 : internalBusRange;
+  const busDeviceAlertThreshold = isExternallyControlled ? externalBusDeviceAlertThreshold || 1 : internalBusDeviceAlertThreshold;
 
   // === ユーティリティ関数 ===
   const updateBusStatusInFirebase = useCallback(async (deviceId: string, devEUI: string, isInBus: boolean) => {
@@ -309,6 +315,14 @@ export default function Mode2Bus({
       setInternalShowAllDevices(value);
     }
   }, [onShowAllDevicesChange]);
+
+  const handleBusDeviceAlertThresholdChange = useCallback((value: number) => {
+    if (onBusDeviceAlertThresholdChange) {
+      onBusDeviceAlertThresholdChange(value);
+    } else {
+      setInternalBusDeviceAlertThreshold(value);
+    }
+  }, [onBusDeviceAlertThresholdChange]);
 
   // === 独立モード用のデータ読み込み ===
   const loadInitialData = useCallback(async () => {
@@ -871,6 +885,30 @@ export default function Mode2Bus({
               onChange={(e) => handleAlertThresholdChange(Number(e.target.value))}
               min={1}
               max={10}
+            />
+          </div>
+
+          {/* バス内デバイス数警告閾値設定 */}
+          <div>
+            <label style={{ 
+              display: 'block', 
+              marginBottom: '8px', 
+              fontWeight: '600', 
+              color: '#333' 
+            }}>
+              バス内置き去りデバイス警告数: {busDeviceAlertThreshold}台
+            </label>
+            <input
+              type="range"
+              style={{
+                width: '100%',
+                marginBottom: '8px'
+              }}
+              value={busDeviceAlertThreshold}
+              onChange={(e) => handleBusDeviceAlertThresholdChange(Number(e.target.value))}
+              min={0}
+              max={10}
+              step={1}
             />
           </div>
         </div>
