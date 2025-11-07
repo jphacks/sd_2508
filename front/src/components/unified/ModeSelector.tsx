@@ -186,7 +186,6 @@ export default function ModeSelector({
                   top: 0,
                   left: 0,
                   right: 0,
-                  height: '4px',
                   backgroundColor: config.color,
                   borderRadius: '16px 16px 0 0'
                 }} />

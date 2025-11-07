@@ -18,6 +18,34 @@ import Mode1Indoor from './Mode1Indoor';
 import Mode2Bus from './Mode2Bus';
 import Mode3GPS from './Mode3GPS';
 
+// 🎨 ステータス表示用の色定義
+const STATUS_COLORS = {
+  // 正常時（緑）
+  success: {
+    color: '#2d7d45',
+    bgColor: '#c8e6c9'
+  },
+  // 警告時（赤）
+  alert: {
+    color: '#d32f2f',
+    bgColor: '#ffcdd2'
+  },
+  // 不明・タイムアウト（黄）
+  warning: {
+    color: '#856404',
+    bgColor: '#fff3cd'
+  },
+  // グレー（未受信）
+  inactive: {
+    color: '#6c757d',
+    bgColor: '#e9ecef'
+  },
+  // エラーテキスト（赤）
+  errorText: '#e57373',
+  // 高温時の背景
+  highTempBg: '#ffebee'
+} as const;
+
 const createJstTimestamp = () => {
   const now = new Date();
   const jstOffsetMinutes = 9 * 60;
@@ -437,14 +465,14 @@ export default function Dashboard() {
   // 状態計算関数
   const getIndoorStatus = (device: Device) => {
     if (!device.statusData) {
-      return { status: '不明', color: '#856404', bgColor: '#fff3cd' };
+      return { status: '不明', ...STATUS_COLORS.warning };
     }
     
     const isInside = device.statusData.inside === true;
     if (isInside) {
-      return { status: '室内', color: '#155724', bgColor: '#d4edda' };
+      return { status: '室内', ...STATUS_COLORS.success };
     } else {
-      return { status: '室外', color: '#721c24', bgColor: '#f8d7da' };
+      return { status: '室外', ...STATUS_COLORS.alert };
     }
   };
 
@@ -463,14 +491,14 @@ export default function Dashboard() {
 
   const getMotionStatus = (device: Device) => {
     if (!device.statusData) {
-      return { status: '不明', color: '#856404', bgColor: '#fff3cd' };
+      return { status: '不明', ...STATUS_COLORS.warning };
     }
     
     const hasShock = device.statusData.shock === true;
     if (hasShock) {
-      return { status: '転倒', color: '#721c24', bgColor: '#f8d7da' };
+      return { status: '転倒', ...STATUS_COLORS.alert };
     } else {
-      return { status: '正常', color: '#155724', bgColor: '#d4edda' };
+      return { status: '正常', ...STATUS_COLORS.success };
     }
   };
 
@@ -481,7 +509,7 @@ export default function Dashboard() {
 
     // 1. Mode2Busと同じローカルBLE判定を最優先で実行
     if (!selectedBeacon) {
-      return { status: 'ビーコン未選択', color: '#856404', bgColor: '#fff3cd' };
+      return { status: 'ビーコン未選択', ...STATUS_COLORS.warning };
     }
 
     const latestBleData = device.bleData?.find(ble =>
@@ -501,23 +529,22 @@ export default function Dashboard() {
             if (isWithinBusRange) {
               return {
                 status: 'バス内',
-                color: shouldAlert ? '#721c24' : '#155724',
-                bgColor: shouldAlert ? '#f8d7da' : '#d4edda'
+                color: shouldAlert ? STATUS_COLORS.alert.color : STATUS_COLORS.success.color,
+                bgColor: shouldAlert ? STATUS_COLORS.alert.bgColor : STATUS_COLORS.success.bgColor
               };
             }
 
             return {
               status: 'バス外',
-              color: '#155724',
-              bgColor: '#d4edda'
+              ...STATUS_COLORS.success
             };
           }
 
-          return { status: '受信タイムアウト', color: '#856404', bgColor: '#fff3cd' };
+          return { status: '受信タイムアウト', ...STATUS_COLORS.warning };
         }
       } catch (error) {
         console.error('バス状態のBLE判定エラー:', error);
-        return { status: 'エラー', color: '#dc3545', bgColor: '#f8d7da' };
+        return { status: 'エラー', color: STATUS_COLORS.errorText, bgColor: STATUS_COLORS.alert.bgColor };
       }
     }
 
@@ -535,11 +562,11 @@ export default function Dashboard() {
             if (isInBus) {
               return { 
                 status: 'バス内', 
-                color: shouldAlert ? '#721c24' : '#155724', 
-                bgColor: shouldAlert ? '#f8d7da' : '#d4edda' 
+                color: shouldAlert ? STATUS_COLORS.alert.color : STATUS_COLORS.success.color, 
+                bgColor: shouldAlert ? STATUS_COLORS.alert.bgColor : STATUS_COLORS.success.bgColor
               };
             }
-            return { status: 'バス外', color: '#155724', bgColor: '#d4edda' };
+            return { status: 'バス外', ...STATUS_COLORS.success };
           }
         } catch (error) {
           console.error('バス状態の時刻確認エラー:', error);
@@ -548,7 +575,7 @@ export default function Dashboard() {
     }
 
     // 3. それでも判定できない場合は未受信扱い
-    return { status: 'BLE未受信', color: '#6c757d', bgColor: '#e9ecef' };
+    return { status: 'BLE未受信', ...STATUS_COLORS.inactive };
   };
 
     // 🔧 GPS状態判定関数を追加
@@ -556,8 +583,7 @@ export default function Dashboard() {
     if (!device.position) {
       return { 
         status: 'GPS未取得', 
-        color: '#6c757d', 
-        bgColor: '#e9ecef'
+        ...STATUS_COLORS.inactive
       };
     }
 
@@ -569,8 +595,7 @@ export default function Dashboard() {
           lat < -90 || lat > 90 || lon < -180 || lon > 180) {
         return { 
           status: 'GPS未取得', 
-          color: '#6c757d', 
-          bgColor: '#e9ecef'
+          ...STATUS_COLORS.inactive
         };
       }
 
@@ -587,16 +612,14 @@ export default function Dashboard() {
       if (updateTime) {
         return {
           status: 'GPS取得済み',
-          color: '#155724',
-          bgColor: '#d4edda',
+          ...STATUS_COLORS.success,
           coordinates: { lat, lon },
           lastUpdate: updateTime
         };
       } else {
         return {
           status: 'GPS取得済み(時刻不明)',
-          color: '#155724',
-          bgColor: '#d4edda',
+          ...STATUS_COLORS.success,
           coordinates: { lat, lon },
           lastUpdate: null
         };
@@ -605,8 +628,7 @@ export default function Dashboard() {
       console.error('GPS状態判定エラー:', error);
       return { 
         status: 'GPS未取得', 
-        color: '#6c757d', 
-        bgColor: '#e9ecef'
+        ...STATUS_COLORS.inactive
       };
     }
   };
@@ -626,7 +648,7 @@ export default function Dashboard() {
       <div style={{ padding: '40px', textAlign: 'center' }}>
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>❌</div>
         <h2>エラーが発生しました</h2>
-        <p style={{ color: '#dc3545' }}>{error}</p>
+        <p style={{ color: STATUS_COLORS.errorText }}>{error}</p>
         <button
           onClick={() => window.location.reload()}
           style={{
@@ -738,18 +760,8 @@ export default function Dashboard() {
                         borderRight: '1px solid #dee2e6',
                         minWidth: '100px'
                       }}>
-                        温度
+                        気温
                       </th>
-                      {/* <th style={{
-                        padding: '12px 16px',
-                        textAlign: 'center',
-                        fontWeight: 'bold',
-                        color: '#495057',
-                        borderRight: '1px solid #dee2e6',
-                        minWidth: '120px'
-                      }}>
-                        最新BLE
-                      </th> */}
                       <th style={{
                         padding: '12px 16px',
                         textAlign: 'center',
@@ -826,12 +838,12 @@ export default function Dashboard() {
                             <div style={{ marginBottom: '4px' }}>
                               <span style={{ fontWeight: 'bold' }}>{device.name}</span>
                               <span style={{
-                                fontSize: '18px',
-                                color: '#666',
+                                fontSize: '15px',
+                                color: '#999',
                                 fontFamily: 'monospace',
                                 marginLeft: '8px'
                               }}>
-                                ({device.deviceId})
+                                {device.deviceId}
                               </span>
                             </div>
                             <div style={{
@@ -911,7 +923,7 @@ export default function Dashboard() {
                             padding: '12px 16px',
                             textAlign: 'center',
                             borderRight: '1px solid #dee2e6',
-                            backgroundColor: temperatureDisplay.isHighTemp ? '#ffebee' : 'transparent'
+                            backgroundColor: temperatureDisplay.isHighTemp ? STATUS_COLORS.highTempBg : 'transparent'
                           }}>
                             <div style={{
                               fontSize: '22px',
@@ -940,7 +952,7 @@ export default function Dashboard() {
                               display: 'inline-block'
                               }}>
                                 {gpsStatus.status}
-                                {gpsStatus.lastUpdate && (
+                                {'lastUpdate' in gpsStatus && gpsStatus.lastUpdate && (
                                 <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
                                   最終更新：{getTimeAgo(gpsStatus.lastUpdate)}
                                 </div>

@@ -99,13 +99,30 @@ export default function Mode2Bus({
   );
 
   // 距離推定関数
-  const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): number => {
+const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): number => {
     if (rssi === 0) return -1;
     const n = 2.0;
     if (rssi > rssiAt1m) return 0.5;
     const ratio = rssiAt1m / rssi;
     if (ratio < 1.0) return 0.5;
     return Math.pow(ratio, (1 / n));
+  }, []);
+
+  const formatTimeAgo = useCallback((timestamp: string | number | Date) => {
+    const time = new Date(timestamp);
+    if (isNaN(time.getTime())) return 'N/A';
+
+    const diffMs = Date.now() - time.getTime();
+    if (diffMs < 60 * 1000) return '1分未満前';
+
+    const minutes = Math.floor(diffMs / (60 * 1000));
+    if (minutes < 60) return `${minutes}分前`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}時間前`;
+
+    const days = Math.floor(hours / 24);
+    return `${days}日前`;
   }, []);
 
   // 実際に使用する値を決定
@@ -722,11 +739,6 @@ export default function Mode2Bus({
                             {isInBus ? 'バス内' : 'バス外'}
                           </span>
                         </h4>
-                        {device.deviceId && device.deviceId !== device.name && (
-                          <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#666', fontFamily: 'monospace' }}>
-                            ID: {device.deviceId}
-                          </p>
-                        )}
                       </div>
                       <div style={{
                         width: '16px',
@@ -765,19 +777,10 @@ export default function Mode2Bus({
                           </div>
                         </div>
                       </div>
-                      
-                      {/* <div>
-                        <strong>推定距離</strong>
-                        <div style={{ marginTop: '4px' }}>
-                          <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#333' }}>
-                            {distance > 0 ? `${distance.toFixed(1)}m` : 'N/A'}
-                          </div>
-                        </div>
-                      </div> */}
                     </div>
                     
                     <div style={{ marginTop: '12px', fontSize: '12px', color: '#666' }}>
-                      最終受信: {latestBleData ? new Date(latestBleData.timestamp).toLocaleString('ja-JP') : 'N/A'}
+                      最終受信: {latestBleData ? formatTimeAgo(latestBleData.timestamp) : 'N/A'}
                     </div>
                   </div>
                 );
