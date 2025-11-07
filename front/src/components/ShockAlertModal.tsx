@@ -1,18 +1,23 @@
 import React, { useEffect } from 'react';
 
-interface ShockAlertModalProps {
-  isOpen: boolean;
+interface ShockAlert {
+  id: string;
+  deviceId: string;
   message: string;
-  onClose: () => void;
+  timestamp: number;
+}
+
+interface ShockAlertModalProps {
+  alerts: ShockAlert[];
+  onClose: (deviceId: string) => void;
 }
 
 export default function ShockAlertModal({
-  isOpen,
-  message,
+  alerts,
   onClose
 }: ShockAlertModalProps) {
 
-  if (!isOpen) return null;
+  if (alerts.length === 0) return null;
 
   return (
     <>
@@ -31,10 +36,9 @@ export default function ShockAlertModal({
           zIndex: 9999,
           animation: 'fadeIn 0.3s ease-in-out'
         }}
-        onClick={onClose}
       />
 
-      {/* モーダルポップアップ */}
+      {/* モーダルコンテナ */}
       <div
         style={{
           position: 'fixed',
@@ -42,78 +46,115 @@ export default function ShockAlertModal({
           left: '50%',
           transform: 'translate(-50%, -50%)',
           backgroundColor: '#fff',
-          borderRadius: '16px',
-          padding: '40px',
+          borderRadius: '12px',
+          padding: '20px',
           boxShadow: '0 10px 40px rgba(0, 0, 0, 0.3)',
           zIndex: 10000,
-          maxWidth: '500px',
+          maxWidth: '450px',
           width: '90%',
-          textAlign: 'center',
+          maxHeight: '70vh',
+          overflowY: 'auto',
           animation: 'popupScale 0.3s ease-out'
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ショックアイコン */}
-        <div
-          style={{
-            fontSize: '80px',
-            marginBottom: '20px',
-            animation: 'bounce 0.6s ease-in-out infinite'
-          }}
-        >
-          💥
+        {/* タイトル */}
+        <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+          <div
+            style={{
+              fontSize: '40px',
+              marginBottom: '5px',
+              animation: 'bounce 0.6s ease-in-out infinite'
+            }}
+          >
+            💥
+          </div>
+          <h2
+            style={{
+              fontSize: '20px',
+              fontWeight: 'bold',
+              color: '#dc3545',
+              margin: 0
+            }}
+          >
+            衝撃検知アラート ({alerts.length}件)
+          </h2>
         </div>
 
-        {/* タイトル */}
-        <h2
-          style={{
-            fontSize: '32px',
-            fontWeight: 'bold',
-            color: '#dc3545',
-            margin: '0 0 16px 0'
-          }}
-        >
-          衝撃検知
-        </h2>
+        {/* アラートリスト */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {alerts.map((alert) => (
+            <div
+              key={alert.id}
+              style={{
+                backgroundColor: '#fff5f5',
+                border: '2px solid #dc3545',
+                borderRadius: '8px',
+                padding: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                animation: 'slideIn 0.3s ease-out'
+              }}
+            >
+              {/* アイコンとメッセージ */}
+              <span style={{ fontSize: '20px', flexShrink: 0 }}>⚠️</span>
+              
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p
+                  style={{
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    color: '#333',
+                    margin: '0 0 4px 0',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {alert.message}
+                </p>
+                <p
+                  style={{
+                    fontSize: '11px',
+                    color: '#666',
+                    margin: 0
+                  }}
+                >
+                  {new Date(alert.timestamp).toLocaleTimeString('ja-JP')}
+                </p>
+              </div>
 
-        {/* メッセージ */}
-        <p
-          style={{
-            fontSize: '18px',
-            color: '#333',
-            margin: '0 0 30px 0',
-            lineHeight: '1.5'
-          }}
-        >
-          {message}
-        </p>
-
-        {/* ボタン */}
-        <button
-          onClick={onClose}
-          style={{
-            padding: '12px 40px',
-            fontSize: '16px',
-            fontWeight: 'bold',
-            backgroundColor: '#dc3545',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 2px 8px rgba(220, 53, 69, 0.3)'
-          }}
-          onMouseEnter={(e) => {
-            (e.target as HTMLButtonElement).style.backgroundColor = '#a71d2a';
-            (e.target as HTMLButtonElement).style.transform = 'scale(1.05)';
-          }}
-          onMouseLeave={(e) => {
-            (e.target as HTMLButtonElement).style.backgroundColor = '#dc3545';
-            (e.target as HTMLButtonElement).style.transform = 'scale(1)';
-          }}
-        >
-          確認
-        </button>
+              {/* 確認ボタン */}
+              <button
+                onClick={() => onClose(alert.deviceId)}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => {
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#a71d2a';
+                  (e.target as HTMLButtonElement).style.transform = 'scale(1.05)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.target as HTMLButtonElement).style.backgroundColor = '#dc3545';
+                  (e.target as HTMLButtonElement).style.transform = 'scale(1)';
+                }}
+              >
+                確認済み
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* アニメーションスタイル */}
@@ -145,6 +186,17 @@ export default function ShockAlertModal({
             }
             50% {
               transform: scale(1.1);
+            }
+          }
+
+          @keyframes slideIn {
+            from {
+              opacity: 0;
+              transform: translateX(-20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateX(0);
             }
           }
         `}

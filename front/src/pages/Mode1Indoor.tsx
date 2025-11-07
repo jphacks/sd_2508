@@ -82,15 +82,13 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     signals: BeaconSignal[];
   } | null>(null);
 
-  // 🔥 Shock検知モーダル用のステート
-  const [shockAlertModal, setShockAlertModal] = useState<{
-    isOpen: boolean;
+  // 🔥 Shock検知アラートのリスト
+  const [shockAlerts, setShockAlerts] = useState<Array<{
+    id: string;
+    deviceId: string;
     message: string;
-    deviceId?: string;
-  }>({
-    isOpen: false,
-    message: ''
-  });
+    timestamp: number;
+  }>>([]);
 
   // 🔥 デフォルトルーム選択のuseEffectを追加
   useEffect(() => {
@@ -239,17 +237,30 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   // ステータス処理（転倒検知など）
   const processStatusData = useCallback((device: Device) => {
     if (device.statusData?.shock === true) {
-      const message = `${device.userName || device.deviceId} が衝撃を検知しました！`;
+      const deviceIdLower = device.devEUI.toLowerCase();
       
-      // モーダルを表示（devEUIを小文字に変換）
-      setShockAlertModal({
-        isOpen: true,
-        message,
-        deviceId: device.devEUI.toLowerCase()
-      });
+      // 既に同じデバイスのアラートが存在しないかチェック
+      setShockAlerts((prev) => {
+        const exists = prev.some(alert => alert.deviceId === deviceIdLower);
+        if (exists) {
+          console.log(`⚠️ ${deviceIdLower} は既にアラートリストに存在します`);
+          return prev;
+        }
 
-      // 音声再生
-      if (audioRef.current) audioRef.current.play();
+        const newAlert = {
+          id: `${deviceIdLower}-${Date.now()}`,
+          deviceId: deviceIdLower,
+          message: `${device.userName || device.deviceId} が衝撃を検知しました！`,
+          timestamp: Date.now()
+        };
+
+        console.log(`🚨 新しいShockアラートを追加:`, newAlert);
+        
+        // 音声再生
+        if (audioRef.current) audioRef.current.play();
+
+        return [...prev, newAlert];
+      });
     }
   }, []);
 
@@ -648,17 +659,18 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   };
 
   // 🔥 Shock検知を確認して、RTDBのshockフラグをfalseに更新
-  const handleShockAlertClose = useCallback(async () => {
-    if (shockAlertModal.deviceId) {
-      try {
-        await update(ref(rtdb, `devices/${shockAlertModal.deviceId}/status`), { shock: false });
-        console.log(`✅ Shock値をfalseに更新: ${shockAlertModal.deviceId}`);
-      } catch (error) {
-        console.error(`❌ Shock値の更新に失敗: ${error}`);
-      }
+  const handleShockAlertClose = useCallback(async (deviceId: string) => {
+    try {
+      await update(ref(rtdb, `devices/${deviceId}/status`), { shock: false });
+      console.log(`✅ Shock値をfalseに更新: ${deviceId}`);
+      
+      // アラートリストから削除
+      setShockAlerts((prev) => prev.filter(alert => alert.deviceId !== deviceId));
+      console.log(`✅ アラートリストから削除: ${deviceId}`);
+    } catch (error) {
+      console.error(`❌ Shock値の更新に失敗: ${error}`);
     }
-    setShockAlertModal({ isOpen: false, message: '' });
-  }, [shockAlertModal.deviceId]);
+  }, []);
 
   const formatTimestamp = (timestamp: string): string => {
     try {
@@ -1389,8 +1401,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
       {/* Shock検知モーダル */}
       <ShockAlertModal
-        isOpen={shockAlertModal.isOpen}
-        message={shockAlertModal.message}
+        alerts={shockAlerts}
         onClose={handleShockAlertClose}
       />
 
