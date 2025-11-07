@@ -264,7 +264,7 @@ export default function Dashboard() {
 
     const loadInitialData = async () => {
       try {
-        // 🌡️ 温度閾値を読み込み
+        //  温度閾値を読み込み
         const tempThresholdDoc = await getDoc(firestoreDoc(db, 'settings', 'temperature-thresholds'));
         if (tempThresholdDoc.exists()) {
           const tempSettings = tempThresholdDoc.data() as TemperatureThresholdSettings;
@@ -584,17 +584,21 @@ export default function Dashboard() {
       }
 
       // 🔧 2種類のパラメータのみ
-      if (timestamp) {
+      if (updateTime) {
         return {
           status: 'GPS取得済み',
           color: '#155724',
-          bgColor: '#d4edda'
+          bgColor: '#d4edda',
+          coordinates: { lat, lon },
+          lastUpdate: updateTime
         };
       } else {
         return {
-          status: 'GPS未取得',
-          color: '#6c757d',
-          bgColor: '#e9ecef'
+          status: 'GPS取得済み(時刻不明)',
+          color: '#155724',
+          bgColor: '#d4edda',
+          coordinates: { lat, lon },
+          lastUpdate: null
         };
       }
     } catch (error) {
@@ -822,7 +826,7 @@ export default function Dashboard() {
                             <div style={{ marginBottom: '4px' }}>
                               <span style={{ fontWeight: 'bold' }}>{device.name}</span>
                               <span style={{
-                                fontSize: '15px',
+                                fontSize: '18px',
                                 color: '#666',
                                 fontFamily: 'monospace',
                                 marginLeft: '8px'
@@ -854,7 +858,7 @@ export default function Dashboard() {
                             <span style={{
                               padding: '4px 12px',
                               borderRadius: '20px',
-                              fontSize: '15px',
+                              fontSize: '20px',
                               fontWeight: 'bold',
                               backgroundColor: indoorStatus.bgColor,
                               color: indoorStatus.color,
@@ -873,7 +877,7 @@ export default function Dashboard() {
                             <span style={{
                               padding: '4px 12px',
                               borderRadius: '20px',
-                              fontSize: '15px',
+                              fontSize: '20px',
                               fontWeight: 'bold',
                               backgroundColor: motionStatus.bgColor,
                               color: motionStatus.color,
@@ -892,7 +896,7 @@ export default function Dashboard() {
                             <span style={{
                               padding: '4px 12px',
                               borderRadius: '20px',
-                              fontSize: '15px',
+                              fontSize: '20px',
                               fontWeight: 'bold',
                               backgroundColor: busStatus.bgColor,
                               color: busStatus.color,
@@ -910,7 +914,7 @@ export default function Dashboard() {
                             backgroundColor: temperatureDisplay.isHighTemp ? '#ffebee' : 'transparent'
                           }}>
                             <div style={{
-                              fontSize: '19px',
+                              fontSize: '22px',
                               fontWeight: 'bold',
                               color: temperatureDisplay.isHighTemp ? '#c62828' : '#333'
                             }}>
@@ -928,7 +932,7 @@ export default function Dashboard() {
                               <span style={{
                               padding: '6px 16px',
                               borderRadius: '20px',
-                              fontSize: '15px',
+                              fontSize: '16px',
                               fontWeight: 'bold',
                               backgroundColor: gpsStatus.bgColor,
                               color: gpsStatus.color,
@@ -936,22 +940,22 @@ export default function Dashboard() {
                               display: 'inline-block'
                               }}>
                                 {gpsStatus.status}
+                                {gpsStatus.lastUpdate && (
+                                <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                  最終更新：{getTimeAgo(gpsStatus.lastUpdate)}
+                                </div>
+                              )}
                               </span>
                               
                               {/* {gpsStatus.coordinates && (
-                                <>
-                                  <div style={{ fontSize: '11px', color: '#333', fontFamily: 'monospace' }}>
-                                    {gpsStatus.coordinates.lat}
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: '#333', fontFamily: 'monospace' }}>
-                                    {gpsStatus.coordinates.lon}
-                                  </div>
-                                </>
-                              )}
-                              
-                              {gpsStatus.lastUpdate && (
-                                <div style={{ fontSize: '10px', color: 'black' }}>
-                                  {gpsStatus.lastUpdate.toLocaleTimeString('ja-JP')}
+                                <div style={{ fontSize: '11px', color: '#333', fontFamily: 'monospace', marginTop: '6px' }}>
+                                  {gpsStatus.coordinates.lat.toFixed(5)}, {gpsStatus.coordinates.lon.toFixed(5)}
+                                </div>
+                              )} */}
+
+                              {/* {gpsStatus.lastUpdate && (
+                                <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                  {getTimeAgo(gpsStatus.lastUpdate)}
                                 </div>
                               )} */}
                             </div>
