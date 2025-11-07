@@ -5,6 +5,7 @@ import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
 import { Device, BLEScan, RoomProfile, Alert, Beacon, CalibrationPoint } from "../types";
 import { estimatePositionHybrid } from "../utils/positioning";
+import ShockAlertModal from "../components/ShockAlertModal";
 
 // ビーコン受信ログの型定義
 interface BeaconLog {
@@ -80,6 +81,16 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     top: number;
     signals: BeaconSignal[];
   } | null>(null);
+
+  // 🔥 Shock検知モーダル用のステート
+  const [shockAlertModal, setShockAlertModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    deviceId?: string;
+  }>({
+    isOpen: false,
+    message: ''
+  });
 
   // 🔥 デフォルトルーム選択のuseEffectを追加
   useEffect(() => {
@@ -228,28 +239,17 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   // ステータス処理（転倒検知など）
   const processStatusData = useCallback((device: Device) => {
     if (device.statusData?.shock === true) {
-      const alertId = `shock-${device.devEUI}`;
-      const alert: Alert = {
-        id: alertId,
-        type: "shock",
-        message: `${device.userName || device.deviceId} で衝撃を検知しました！`,
-        deviceId: device.devEUI,
-        deviceName: device.userName,
-        timestamp: new Date().toISOString(),
-        dismissed: false,
-        mode: 'indoor'
-      };
-
-      setAlerts((prev) => {
-        if (prev.some((a) => a.id === alertId)) return prev;
-        return [...prev, alert];
+      const message = `${device.userName || device.deviceId} が衝撃を検知しました！`;
+      
+      // モーダルを表示（devEUIを小文字に変換）
+      setShockAlertModal({
+        isOpen: true,
+        message,
+        deviceId: device.devEUI.toLowerCase()
       });
 
+      // 音声再生
       if (audioRef.current) audioRef.current.play();
-
-      setTimeout(() => {
-        setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-      }, 10000);
     }
   }, []);
 
@@ -646,6 +646,19 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   const dismissAlert = (alertId: string) => {
     setAlerts((prev) => prev.filter((a) => a.id !== alertId));
   };
+
+  // 🔥 Shock検知を確認して、RTDBのshockフラグをfalseに更新
+  const handleShockAlertClose = useCallback(async () => {
+    if (shockAlertModal.deviceId) {
+      try {
+        await update(ref(rtdb, `devices/${shockAlertModal.deviceId}/status`), { shock: false });
+        console.log(`✅ Shock値をfalseに更新: ${shockAlertModal.deviceId}`);
+      } catch (error) {
+        console.error(`❌ Shock値の更新に失敗: ${error}`);
+      }
+    }
+    setShockAlertModal({ isOpen: false, message: '' });
+  }, [shockAlertModal.deviceId]);
 
   const formatTimestamp = (timestamp: string): string => {
     try {
@@ -1374,17 +1387,24 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         </div>
       </div>
 
-      {alerts.length > 0 && (
+      {/* Shock検知モーダル */}
+      <ShockAlertModal
+        isOpen={shockAlertModal.isOpen}
+        message={shockAlertModal.message}
+        onClose={handleShockAlertClose}
+      />
+
+      {/* その他のアラート表示（shock以外） */}
+      {alerts.filter(a => a.type !== 'shock').length > 0 && (
         <div className="alert-stack">
-          {alerts.map((alert) => {
+          {alerts.filter(a => a.type !== 'shock').map((alert) => {
             // アラートタイプに応じて背景色とアイコンを変更
-            const isShock = alert.type === "shock";
             const alertStyle = {
-              backgroundColor: isShock ? "#dc3545" : "#ff6b35", // 衝撃: 濃い赤、退室: オレンジ
-              border: isShock ? "3px solid #a71d2a" : "3px solid #cc5529",
-              animation: isShock ? "pulse 0.5s ease-in-out infinite" : "none",
+              backgroundColor: "#ff6b35", // 退室: オレンジ
+              border: "3px solid #cc5529",
+              animation: "none",
             };
-            const alertIcon = isShock ? "💥 衝撃検知" : "🚪 部屋退室";
+            const alertIcon = "🚪 部屋退室";
             
             return (
               <div
