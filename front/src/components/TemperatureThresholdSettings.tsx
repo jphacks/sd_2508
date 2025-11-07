@@ -17,15 +17,12 @@ export default function TemperatureThresholdSettingsComponent() {
 
   const loadSettings = async () => {
     try {
-      console.log('温度閾値設定を読み込み中...');
       const docRef = doc(db, 'settings', 'temperature-thresholds');
       const docSnap = await getDoc(docRef);
       
       if (docSnap.exists()) {
-        console.log('読み込んだデータ:', docSnap.data());
         setSettings(docSnap.data() as TemperatureThresholdSettings);
       } else {
-        console.log('ドキュメントが存在しません。デフォルト値を使用します。');
       }
     } catch (error: any) {
       console.error('温度閾値設定の読み込みエラー:', error);
@@ -38,9 +35,6 @@ export default function TemperatureThresholdSettingsComponent() {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      console.log('現在のユーザー:', auth.currentUser);
-      console.log('保存しようとしているデータ:', settings);
-      
       // undefinedのフィールドを除外
       const dataToSave: any = {
         highTempThreshold: settings.highTempThreshold
@@ -51,12 +45,8 @@ export default function TemperatureThresholdSettingsComponent() {
         dataToSave.lowTempThreshold = settings.lowTempThreshold;
       }
       
-      console.log('実際に保存するデータ:', dataToSave);
-      
       const docRef = doc(db, 'settings', 'temperature-thresholds');
       await setDoc(docRef, dataToSave);
-      
-      console.log('保存成功');
       alert('設定を保存しました');
     } catch (error: any) {
       console.error('温度閾値設定の保存エラー:', error);

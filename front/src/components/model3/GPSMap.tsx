@@ -282,7 +282,6 @@ export default function GPSMap({
       setIsMapLoaded(true);
       drawGeofences();
 
-      console.log('GPS マップ初期化完了');
     } catch (error) {
       console.error('マップ初期化エラー:', error);
       setTimeout(initializeMap, 2000);

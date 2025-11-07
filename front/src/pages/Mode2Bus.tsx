@@ -132,12 +132,10 @@ export default function Mode2Bus({
     const now = Date.now();
     
     if (now - lastUpdateRef.current < updateThrottleMs) {
-      console.log('⏱️ Firebase更新スロットル中 - スキップ');
       return;
     }
 
     if (now - lastAlertCheckRef.current < alertCheckThrottleMs) {
-      console.log('⏱️ 警告チェックスロットル中 - スキップ');
       return;
     }
     
@@ -148,15 +146,13 @@ export default function Mode2Bus({
     const effectiveSelectedBeacon = overrideSelectedBeacon ?? selectedBeacon;
 
     if (!effectiveSelectedBeacon || !alertEnabled) {
-      console.log('⚠️ ビーコン未選択または警告無効のため処理をスキップ');
+      console.warn('⚠️ ビーコン未選択または警告無効のため処理をスキップ');
       return;
     }
 
     try {
       const currentTime = new Date();
       const thresholdMs = alertThreshold * 60 * 1000;
-
-      console.log(`🔍 置き去り検知開始: RSSI閾値=${effectiveRssiThreshold}dBm, 警告時間=${alertThreshold}分`);
 
       const devicesInBus = devices.filter(device => {
         if (!device.bleData || !Array.isArray(device.bleData)) return false;
@@ -176,11 +172,6 @@ export default function Mode2Bus({
           const isWithinBusRange = latestBleData.rssi >= effectiveRssiThreshold;
           
           const isInBus = isRecentlyReceived && isWithinBusRange;
-          
-          if (isInBus) {
-            console.log(`✅ ${device.name}: バス内 (RSSI: ${latestBleData.rssi}dBm, 距離: ${estimateDistance(latestBleData.rssi).toFixed(1)}m)`);
-          }
-          
           return isInBus;
         } catch (error) {
           console.error(`❌ ${device.name}: BLEデータ処理エラー:`, error);
@@ -188,19 +179,15 @@ export default function Mode2Bus({
         }
       });
 
-      console.log(`🚌 バス内デバイス数: ${devicesInBus.length}/${devices.length}`);
-
       // Firebase更新（効果的な値を使用）
       const updatePromises = devices.map(async (device) => {
         const isInBus = devicesInBus.some(busDevice => busDevice.id === device.id);
         if (device.devEUI) {
-          console.log(`🔄 ${device.name}: バス状態更新 → ${isInBus ? 'バス内' : 'バス外'}`);
           await updateBusStatusInFirebase(device.id, device.devEUI, isInBus);
         }
       });
 
       await Promise.all(updatePromises);
-      console.log('✅ 全デバイスのバス状態更新完了');
 
       // 警告ロジック（既存のまま、effectiveSelectedBeaconとeffectiveRssiThresholdを使用）
       if (devicesInBus.length === 1) {
@@ -241,8 +228,6 @@ export default function Mode2Bus({
   }, [onSelectedBeaconChange]);
 
   const handleRssiThresholdChange = useCallback(async (value: number) => {
-    console.log('📶 Mode2Bus: RSSI閾値変更開始:', value, 'dBm');
-    
     if (onRssiThresholdChange) {
       onRssiThresholdChange(value);
     } else {
@@ -253,17 +238,11 @@ export default function Mode2Bus({
     if (selectedBeacon && devices.length > 0) {
       const now = Date.now();
       if (now - lastUpdateRef.current >= 1000) { // 1秒に短縮
-        console.log('🔄 Mode2Bus: RSSI閾値変更による即座更新実行');
-        
         setTimeout(async () => {
           if (selectedBeacon && devices.length > 0) {
-            console.log('📶 Mode2Bus: RSSI閾値変更後の状態更新開始');
             await checkForAloneDevicesThrottled(value, undefined);
-            console.log('✅ Mode2Bus: RSSI閾値変更による更新完了');
           }
         }, 200); // 遅延を短縮
-      } else {
-        console.log('⏱️ RSSI閾値変更: 前回更新から1秒未満のためスキップ');
       }
     }
   }, [onRssiThresholdChange, selectedBeacon, devices.length, checkForAloneDevicesThrottled]);
@@ -278,8 +257,6 @@ export default function Mode2Bus({
   }, []);
 
   const handleBusRangeChange = useCallback(async (value: number) => {
-    console.log('📐 Mode2Bus: バス範囲変更開始:', value, 'm');
-    
     if (onBusRangeChange) {
       onBusRangeChange(value);
     } else {
@@ -290,19 +267,13 @@ export default function Mode2Bus({
     if (selectedBeacon && devices.length > 0) {         
       const now = Date.now();
       if (now - lastUpdateRef.current >= 1000) {
-        console.log('🔄 Mode2Bus: バス範囲変更による即座更新実行');
-        
         setTimeout(async () => {
           if (selectedBeacon && devices.length > 0) {
-            console.log('📐 Mode2Bus: バス範囲変更後の状態更新開始');
             // バス範囲からRSSI閾値を計算して渡す
             const calculatedRssi = distanceToRssi(value);
             await checkForAloneDevicesThrottled(calculatedRssi, undefined);
-            console.log('✅ Mode2Bus: バス範囲変更による更新完了');
           }
         }, 200);
-      } else {
-        console.log('⏱️ バス範囲変更: 前回更新から1秒未満のためスキップ');
       }
     }
   }, [onBusRangeChange, selectedBeacon, devices.length, checkForAloneDevicesThrottled, distanceToRssi]);
@@ -400,15 +371,13 @@ export default function Mode2Bus({
   // === リアルタイム監視 ===
   const setupRealtimeMonitoring = useCallback(() => {
     if (!selectedBeacon || isExternalDataMode) {
-      console.log('⚠️ 外部データモードまたはビーコン未選択のため、RTDB監視をスキップ');
+      console.warn('⚠️ 外部データモードまたはビーコン未選択のため、RTDB監視をスキップ');
       return;
     }
 
     rtdbUnsubscribersRef.current.forEach(unsubscribe => unsubscribe());
     rtdbUnsubscribersRef.current = [];
 
-    console.log(`🔄 ビーコン ${selectedBeacon} のリアルタイム監視を開始`);
-    
     const unsubscribers = devices.map(device => {
       const normalizedDeviceId = device.devEUI?.toLowerCase();
       if (!normalizedDeviceId) {
@@ -450,7 +419,6 @@ export default function Mode2Bus({
                 });
                 
                 if (hasRealChange) {
-                  console.log(`📶 ${device.name}: BLE実データ変更検出 (RSSI変化3dBm以上)`);
                   shouldTriggerUpdate = true;
                   return { ...d, bleData };
                 }
@@ -465,7 +433,6 @@ export default function Mode2Bus({
           // ✅ BLE受信時にinBus判定を実行
           if (shouldTriggerUpdate) {
             setTimeout(() => {
-              console.log(`🔄 ${device.name}: BLE受信による状態更新実行`);
               checkForAloneDevicesThrottled();
             }, 200);
           }
@@ -574,12 +541,7 @@ export default function Mode2Bus({
         handleSelectedBeaconChange(externalBeacons[0].id);
       }
       
-      console.log('🔄 外部データモードで初期化:', {
-        devicesCount: externalDevices.length,
-        beaconsCount: externalBeacons.length
-      });
     } else {
-      console.log('🔄 独立モードで初期化');
       loadInitialData();
     }
   }, [externalDevices, externalBeacons, isExternalDataMode, loadInitialData, selectedBeacon, handleSelectedBeaconChange]);
@@ -588,7 +550,6 @@ export default function Mode2Bus({
     if (isExternalDataMode && externalDevices && Array.isArray(externalDevices)) {
       const timer = setTimeout(() => {
         setDevices(externalDevices);
-        console.log('📱 外部デバイスデータ更新:', externalDevices.length);
       }, 100);
 
       return () => clearTimeout(timer);
@@ -598,7 +559,6 @@ export default function Mode2Bus({
   useEffect(() => {
     if (isExternalDataMode && externalBeacons && Array.isArray(externalBeacons)) {
       setBeacons(externalBeacons);
-      console.log('📡 外部ビーコンデータ更新:', externalBeacons.length);
     }
   }, [externalBeacons, isExternalDataMode]);
 

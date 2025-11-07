@@ -95,7 +95,6 @@ export default function Dashboard() {
         busStatusUpdatedAt: createJstTimestamp()
       });
 
-      console.log(`✅ ${deviceId}: バス状態更新完了 (${isInBus ? 'バス内' : 'バス外'})`);
     } catch (error) {
       console.error(`❌ ${deviceId}: バス状態更新エラー:`, error);
     }
@@ -110,13 +109,10 @@ export default function Dashboard() {
       : rssiThreshold;
     
     if (!effectiveSelectedBeacon || devices.length === 0) {
-      console.log('⚠️ バス状態更新スキップ: ビーコン未選択またはデバイスなし');
+      console.warn('⚠️ バス状態更新スキップ: ビーコン未選択またはデバイスなし');
       return;
     }
 
-    console.log('🔄 全デバイスのバス状態更新開始...');
-    console.log(`🎯 判定基準: RSSI ${effectiveRssiThreshold}dBm以上をバス内と判定 (${effectiveBusRange}m相当)`);
-    
     const currentTime = new Date();
     let busDeviceCount = 0;
     
@@ -146,10 +142,6 @@ export default function Dashboard() {
               
               isInBus = isRecentlyReceived && isWithinBusRange;
               
-              // 🔧 詳細ログを追加
-              const estimatedDistance = estimateDistance(latestBleData.rssi);
-              console.log(`📊 ${device.name}: RSSI=${latestBleData.rssi}dBm, 距離=${estimatedDistance.toFixed(1)}m, 閾値=${effectiveRssiThreshold}dBm, 判定=${isInBus ? 'バス内' : 'バス外'}`);
-              
               if (isInBus) {
                 busDeviceCount++;
               }
@@ -165,7 +157,6 @@ export default function Dashboard() {
 
     try {
       await Promise.all(updatePromises);
-      console.log(`🚌 バス状態更新完了: ${devices.length}台処理, バス内: ${busDeviceCount}台`);
     } catch (error) {
       console.error('❌ バス状態一括更新エラー:', error);
     }
@@ -178,12 +169,10 @@ export default function Dashboard() {
     const now = Date.now();
     
     if (now - lastUpdateRef.current < updateThrottleMs) {
-      console.log('⏱️ バス状態更新スロットル中 - スキップ');
       return;
     }
     
     lastUpdateRef.current = now;
-    console.log('🔄 設定変更によるバス状態更新トリガー', { overrideBusRange, overrideSelectedBeacon });
     await updateBusStatusForAllDevices(overrideBusRange, overrideSelectedBeacon);
   }, [updateBusStatusForAllDevices]);
 
@@ -194,7 +183,6 @@ export default function Dashboard() {
 
   // === 設定変更のハンドラー関数 ===
   const handleSelectedBeaconChange = useCallback(async (beaconId: string) => {
-    console.log('🎯 ビーコン変更:', beaconId);
     setSelectedBeacon(beaconId);
   }, [setSelectedBeacon]);
 
@@ -202,7 +190,6 @@ export default function Dashboard() {
     setBusRange(range);
     const newThreshold = distanceToRssi(range);
     setRssiThreshold(newThreshold);
-    console.log('📐 バス有効範囲変更:', range, 'm', '→ RSSI:', newThreshold, 'dBm');
 
     if (triggerBusStatusUpdateRef.current) {
       await triggerBusStatusUpdateRef.current(range);
@@ -212,34 +199,28 @@ export default function Dashboard() {
 
   const handleAlertThresholdChange = useCallback(async (threshold: number) => {
     setAlertThreshold(threshold);
-    console.log('⏰ 警告時間変更:', threshold);
   }, []);
 
 
   const handleAlertEnabledChange = useCallback((enabled: boolean) => {
     setAlertEnabled(enabled);
-    console.log('🚨 警告有効/無効:', enabled);
   }, []);
 
   const handleConnectionTimeoutChange = useCallback((timeout: number) => {
     setConnectionTimeout(timeout);
-    console.log('⏱️ 接続タイムアウト変更:', timeout);
   }, []);
 
   const handleShowAllDevicesChange = useCallback((show: boolean) => {
     setShowAllDevices(show);
-    console.log('👁️ 全デバイス表示:', show);
   }, []);
 
   // 🔧 RSSI閾値の直接変更ハンドラー
   const handleRssiThresholdChange = useCallback(async (threshold: number) => {
-    console.log('📶 RSSI閾値変更開始:', threshold, 'dBm');
     setRssiThreshold(threshold);
     
     // RSSI値から距離を逆算して範囲を更新
     const estimatedRange = estimateDistance(threshold);
     const newRange = Math.max(1, Math.min(20, estimatedRange));
-    console.log('📶 RSSI閾値変更:', threshold, 'dBm', '→ 推定範囲:', estimatedRange.toFixed(1), 'm', '→ 実際設定:', newRange, 'm');
     
     setBusRange(newRange);
 
@@ -273,7 +254,6 @@ export default function Dashboard() {
   };
 
   const handleModeChange = useCallback((mode: Mode) => {
-    console.log('モード変更:', currentMode, '→', mode);
     setCurrentMode(mode);
   }, [currentMode]);
 
@@ -283,14 +263,11 @@ export default function Dashboard() {
 
     const loadInitialData = async () => {
       try {
-        console.log('📱 データ読み込み開始...');
-        
         // 🌡️ 温度閾値を読み込み
         const tempThresholdDoc = await getDoc(firestoreDoc(db, 'settings', 'temperature-thresholds'));
         if (tempThresholdDoc.exists()) {
           const tempSettings = tempThresholdDoc.data() as TemperatureThresholdSettings;
           setTemperatureThreshold(tempSettings.highTempThreshold || 28);
-          console.log('🌡️ 温度閾値を読み込みました:', tempSettings.highTempThreshold);
         }
         
         // ビーコンデータを読み込み
@@ -412,7 +389,6 @@ export default function Dashboard() {
                       });
                       
                       if (hasRealChange) {
-                        console.log(`📶 ${device.name}: BLE実データ変更検出`);
                         hasDeviceChanged = true;
                         return { ...d, bleData, lastUpdate: new Date() };
                       }
@@ -498,13 +474,6 @@ export default function Dashboard() {
   };
 
   const getBusStatus = (device: Device) => {
-    console.log(`🔍 ${device.name} バス状態判定開始:`, {
-      hasStatusData: !!device.statusData,
-      inBus: device.statusData?.inBus,
-      lastUpdated: device.statusData?.busStatusUpdatedAt,
-      selectedBeacon,
-      hasBleData: !!device.bleData?.length
-    });
 
     // 1. Mode2Busと同じローカルBLE判定を最優先で実行
     if (!selectedBeacon) {
@@ -523,14 +492,6 @@ export default function Dashboard() {
           const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000; // 5分以内
           const isWithinBusRange = latestBleData.rssi >= calculatedRssiThreshold;
           const estimatedDistance = estimateDistance(latestBleData.rssi);
-
-          console.log(`📊 ${device.name} ローカル判定:`, {
-            rssi: latestBleData.rssi,
-            threshold: calculatedRssiThreshold,
-            distance: estimatedDistance.toFixed(1),
-            isWithinRange: isWithinBusRange,
-            isRecent: isRecentlyReceived
-          });
 
           if (isRecentlyReceived) {
             if (isWithinBusRange) {
@@ -565,12 +526,6 @@ export default function Dashboard() {
         try {
           const updateTime = new Date(lastUpdated);
           const timeSinceUpdate = Date.now() - updateTime.getTime();
-
-          console.log(`📊 ${device.name} RTDB判定:`, {
-            inBus: isInBus,
-            timeSinceUpdate: Math.floor(timeSinceUpdate / 1000),
-            isRecent: timeSinceUpdate < 5 * 60 * 1000
-          });
 
           if (timeSinceUpdate < 5 * 60 * 1000) {
             if (isInBus) {

@@ -101,8 +101,6 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       };
       
       // Firebase Analyticsまたはログサービスに送信
-      console.log('Error reported:', errorData);
-      
     } catch (reportError) {
       console.error('Failed to report error:', reportError);
     }

@@ -327,30 +327,24 @@ export default function AddCalibrationPoint() {
     const trackerRef = ref(rtdb, `devices/${normalizedDeviceId}`);
     trackerRefRef.current = trackerRef;
     
-    console.log('📍 測定開始:', { selectedDevice, normalizedDeviceId, path: `devices/${normalizedDeviceId}` });
     
     // 測定開始時のタイムスタンプを記録
     let initialTimestamp: string | null = null;
     
     const listener = onValue(trackerRef, (snapshot) => {
       const data = snapshot.val();
-      console.log('📡 RTDB更新検知:', { data, timestamp: data?.beaconsUpdatedAt });
       
       if (data && data.beacons) {
         const currentTimestamp = data.beaconsUpdatedAt;
-        console.log('⏰ タイムスタンプ比較:', { initialTimestamp, currentTimestamp, isNew: currentTimestamp !== initialTimestamp });
         
         // 初回の呼び出しでタイムスタンプを記録
         if (initialTimestamp === null) {
           initialTimestamp = currentTimestamp;
-          console.log('✅ 初回タイムスタンプ記録:', initialTimestamp);
           return;
         }
         
         // タイムスタンプが更新されたら新しいデータと判定
         if (currentTimestamp !== initialTimestamp) {
-          console.log('🎯 新しいデータ検知！測定完了');
-          
           // 各ビーコンからRSSI値を取得
           const rssiMap: { [beaconId: string]: number } = {};
           
@@ -361,9 +355,6 @@ export default function AddCalibrationPoint() {
               rssiMap[normalizedMac] = beacon.rssi;
             }
           });
-          
-          console.log('📊 取得したRSSI値:', rssiMap);
-          
           setCurrentMeasurement({
             deviceId: selectedDevice,
             timestamp: currentTimestamp,
@@ -380,7 +371,7 @@ export default function AddCalibrationPoint() {
           }
         }
       } else {
-        console.log('⚠️ beaconsデータが見つかりません', data);
+        console.warn('⚠️ beaconsデータが見つかりません', data);
       }
     }, (error) => {
       console.error('❌ RTDB読み込みエラー:', error);
@@ -391,7 +382,7 @@ export default function AddCalibrationPoint() {
 
     // 5分後にタイムアウト
     const timeout = setTimeout(() => {
-      console.log('⏱️ 測定がタイムアウト');
+      console.warn('⏱️ 測定がタイムアウト');
       setIsScanning(false);
       if (trackerRefRef.current) {
         off(trackerRefRef.current);
@@ -405,7 +396,6 @@ export default function AddCalibrationPoint() {
   };
 
   const cancelMeasurement = () => {
-    console.log('❌ 測定をキャンセル');
     setIsScanning(false);
     
     if (trackerRefRef.current) {

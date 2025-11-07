@@ -95,7 +95,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     if (availableRooms.length > 0 && !roomProfile) {
       // 最初の部屋をデフォルトで選択
       setRoomProfile(availableRooms[0]);
-      console.log('デフォルト部屋を選択:', availableRooms[0].name);
     }
   }, [availableRooms, roomProfile]);
   
@@ -201,13 +200,12 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       if (activeRoomId) {
         // 使用中に設定されたルームを検索
         selectedRoom = roomProfiles.find(room => room.roomId === activeRoomId) || null;
-        console.log('✅ アクティブルーム発見:', selectedRoom?.name);
       }
       
       if (!selectedRoom && roomProfiles.length > 0) {
         // フォールバック: 最初のルームを使用
         selectedRoom = roomProfiles[0];
-        console.log('⚠️ フォールバック: 最初のルーム使用:', selectedRoom.name);
+        console.warn('⚠️ フォールバック: 最初のルーム使用:', selectedRoom.name);
       }
       
       if (selectedRoom) {
@@ -216,13 +214,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       
       setIsInitialized(true);
       setLoading(false);
-      
-      console.log('✅ Mode1 初期化完了:', {
-        beacons: beaconsData.length,
-        rooms: roomProfiles.length,
-        activeRoom: selectedRoom?.name,
-        activeRoomId
-      });
       
     } catch (error) {
       console.error('❌ Mode1 データ読み込みエラー:', error);
@@ -243,7 +234,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       setShockAlerts((prev) => {
         const exists = prev.some(alert => alert.deviceId === deviceIdLower);
         if (exists) {
-          console.log(`⚠️ ${deviceIdLower} は既にアラートリストに存在します`);
+          console.warn(`⚠️ ${deviceIdLower} は既にアラートリストに存在します`);
           return prev;
         }
 
@@ -254,8 +245,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
           timestamp: Date.now()
         };
 
-        console.log(`🚨 新しいShockアラートを追加:`, newAlert);
-        
         // 音声再生
         if (audioRef.current) audioRef.current.play();
 
@@ -265,12 +254,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   }, []);
 
   const performPositionEstimation = useCallback((device: Device, scan: BLEScan) => {
-    console.log(`🎯 Mode1 位置推定開始: ${device.name}`, {
-      scanTimestamp: scan.ts,
-      scanBeacons: scan.beacons.length,
-      roomProfile: roomProfile?.name
-    });
-
     try {
       if (!roomProfile?.calibrationPoints) {
         console.warn(`⚠️ Mode1 CalibrationPointsが未設定: ${device.name}`);
@@ -308,12 +291,9 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
           
           if (!isInvalidSignal) {
             rssiMap[normalizedMac] = beacon.rssi;
-            console.log(`📡 RSSI追加: ${normalizedMac} -> ${beacon.rssi}dBm`);
           }
         }
       });
-
-      console.log(`📊 ${device.name}のRSSI値:`, rssiMap);
 
       if (Object.keys(rssiMap).length === 0) {
         console.warn(`⚠️ ${device.name}: 有効なRSSI値がありません`);
@@ -328,13 +308,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       );
 
       if (position) {
-        console.log(`📍 ${device.name} 位置推定結果:`, {
-          normalizedPosition: { x: position.x.toFixed(3), y: position.y.toFixed(3) },
-          method: position.method,
-          confidence: `${(position.confidence * 100).toFixed(1)}%`,
-          rssiCount: Object.keys(rssiMap).length
-        });
-
         // 座標変換
         const outlineWidth = roomProfile.outline?.width ?? 1;
         const outlineHeight = roomProfile.outline?.height ?? 1;
@@ -343,16 +316,10 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
           y: position.y * outlineHeight
         };
 
-        console.log(`📍 ${device.name} 実座標換算:`, {
-          position: { x: actualPosition.x.toFixed(2), y: actualPosition.y.toFixed(2) },
-          roomSize: { width: outlineWidth, height: outlineHeight }
-        });
-
         // 🔧 位置情報を即座に更新
         setDevicePositions(prev => {
           const newMap = new Map(prev);
           newMap.set(device.devEUI, actualPosition);
-          console.log(`🎯 位置更新: ${device.name}`, actualPosition);
           return newMap;
         });
 
@@ -360,7 +327,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
         // 🔧 描画を強制実行
         setTimeout(() => {
-          console.log(`🎨 ${device.name}: 描画強制実行`);
           if (roomProfile && canvasRef.current) {
             drawRoom();
           }
@@ -375,14 +341,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
   // 🔥 Mode1専用のデータ処理関数
   const processDeviceDataForMode1 = useCallback((device: Device) => {
-    console.log(`📊 Mode1 データ処理開始: ${device.userName || device.name}`, {
-      hasRoomProfile: !!roomProfile,
-      hasBeacons: beaconsRef.current.length > 0,
-      bleDataLength: device.bleData?.length || 0,
-      statusData: !!device.statusData,
-      lastUpdate: device.lastUpdate
-    });
-
     // 🔥 必要な条件をチェック
     if (!roomProfile) {
       console.warn(`⚠️ Mode1 roomProfile未設定: ${device.name}`);
@@ -396,24 +354,10 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
     // BLEデータがある場合の位置推定
     if (device.bleData && device.bleData.length > 0) {
-      console.log(`📡 Mode1 BLE処理: ${device.name}`, {
-        bleCount: device.bleData.length,
-        bleData: device.bleData.map(ble => ({
-          mac: ble.mac,
-          rssi: ble.rssi,
-          beaconId: ble.beaconId
-        }))
-      });
-
       // 🔥 BLEScanデータの構築（詳細ログ付き）
       const latestScan: BLEScan = {
         ts: device.lastUpdate?.toISOString() || new Date().toISOString(),
         beacons: device.bleData.map(ble => {
-          console.log(`📡 BLEデータ変換: ${device.name}`, {
-            originalMac: ble.mac,
-            originalRssi: ble.rssi,
-            beaconId: ble.beaconId
-          });
           return {
             mac: ble.mac,
             rssi: ble.rssi,
@@ -421,12 +365,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
           };
         })
       };
-
-      console.log(`📊 Mode1 BLEScan構築完了: ${device.name}`, {
-        timestamp: latestScan.ts,
-        beaconCount: latestScan.beacons.length,
-        beacons: latestScan.beacons
-      });
 
       // 🔥 位置推定処理を実行
       try {
@@ -445,7 +383,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         };
       });
       
-      console.log(`📶 Mode1 シグナル更新: ${device.name}`, signals);
       setDeviceBeaconSignals(prev => new Map(prev.set(device.devEUI, signals)));
     } else {
       console.warn(`⚠️ Mode1 BLEデータなし: ${device.name}`);
@@ -453,7 +390,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
     // ステータスデータがある場合の処理
     if (device.statusData) {
-      console.log(`📊 Mode1 ステータス処理: ${device.name}`, device.statusData);
       processStatusData(device);
     }
 
@@ -461,7 +397,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     if (device.lastUpdate) {
       const timestamp = device.lastUpdate.toISOString();
       setDeviceTimestamps(prev => new Map(prev.set(device.devEUI, timestamp)));
-      console.log(`⏰ Mode1 タイムスタンプ更新: ${device.name}`, timestamp);
     }
   }, [roomProfile, processStatusData]);
 
@@ -470,11 +405,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     if (!externalDevices || !isInitialized || !roomProfile) {
       return;
     }
-
-    console.log('📡 Mode1 外部データ変更検知:', {
-      deviceCount: externalDevices.length,
-      timestamp: new Date().toISOString()
-    });
 
     // 🔧 デバイスごとのBLEデータ変更を詳細チェック
     externalDevices.forEach((externalDevice, index) => {
@@ -489,16 +419,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         currentDevice.lastUpdate?.getTime() !== externalDevice.lastUpdate?.getTime();
 
       if (hasBleChange || hasTimeChange) {
-        console.log(`🔄 Mode1 デバイス変更検知: ${externalDevice.name}`, {
-          index,
-          hasBleChange,
-          hasTimeChange,
-          currentBleCount: currentDevice?.bleData?.length || 0,
-          newBleCount: externalDevice.bleData?.length || 0,
-          currentUpdate: currentDevice?.lastUpdate?.toISOString(),
-          newUpdate: externalDevice.lastUpdate?.toISOString()
-        });
-
         // 即座にデバイスデータを処理
         processDeviceDataForMode1(externalDevice);
       }
@@ -526,18 +446,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
             },
             measurements: [] // 空の配列で初期化
           };
-          
-          console.log(`📍 CalibrationPoint変換: ${beaconId}`, {
-            id: calibrationPoint.id,
-            label: calibrationPoint.label,
-            position: calibrationPoint.position,
-            originalBeacon: {
-              firestoreId: beacon.firestoreId,
-              mac: beacon.mac,
-              name: beacon.name
-            }
-          });
-          
           return calibrationPoint;
         }
         
@@ -563,23 +471,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       position.y >= -margin &&
       position.y <= outlineHeight + margin
     );
-
-    console.log(`🔍 ${device.deviceId} 部屋チェック:`, {
-      position: { x: position.x.toFixed(2), y: position.y.toFixed(2) },
-      roomBounds: { 
-        width: outlineWidth, 
-        height: outlineHeight 
-      },
-      margin,
-      isInside,
-      forceOutside,
-      checks: {
-        xMin: position.x >= -margin,
-        xMax: position.x <= outlineWidth + margin,
-        yMin: position.y >= -margin,
-        yMax: position.y <= outlineHeight + margin
-      }
-    });
 
     const normalizedDeviceId = device.devEUI?.toLowerCase();
     if (normalizedDeviceId) {
@@ -662,11 +553,8 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   const handleShockAlertClose = useCallback(async (deviceId: string) => {
     try {
       await update(ref(rtdb, `devices/${deviceId}/status`), { shock: false });
-      console.log(`✅ Shock値をfalseに更新: ${deviceId}`);
-      
       // アラートリストから削除
       setShockAlerts((prev) => prev.filter(alert => alert.deviceId !== deviceId));
-      console.log(`✅ アラートリストから削除: ${deviceId}`);
     } catch (error) {
       console.error(`❌ Shock値の更新に失敗: ${error}`);
     }
@@ -703,20 +591,9 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   };
 
   useEffect(() => {
-    console.log('🎨 描画トリガー - devicePositions変更:', {
-      roomProfile: !!roomProfile,
-      deviceCount: devices.length,
-      positionCount: devicePositions.size,
-      positions: Array.from(devicePositions.entries()).map(([devEUI, pos]) => ({
-        devEUI,
-        position: { x: pos.x.toFixed(2), y: pos.y.toFixed(2) }
-      }))
-    });
-
     if (roomProfile && canvasRef.current) {
       // 🔧 短い遅延で確実に描画
       const timer = setTimeout(() => {
-        console.log('🎨 実際の描画実行');
         drawRoom();
       }, 50);
 
@@ -726,7 +603,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
   useEffect(() => {
     if (roomProfile && devices.length > 0 && devicePositions.size > 0) {
-      console.log('🎨 デバイス変更による描画実行');
       const timer = setTimeout(() => {
         drawRoom();
       }, 100);
@@ -842,14 +718,8 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   const drawRoom = () => {
     const canvas = canvasRef.current;
     if (!canvas || !roomProfile) {
-      console.log("Canvas or roomProfile not ready");
       return;
     }
-
-    console.log("Drawing room...", {
-      furniture: roomProfile.furniture?.length || 0,
-      devices: devicePositions.size,
-    });
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -995,7 +865,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
     // 家具を描画（中間層）
     if (roomProfile.furniture && roomProfile.furniture.length > 0) {
-      console.log('Drawing furniture:', roomProfile.furniture.length);
       roomProfile.furniture.forEach(furniture => {
         // ドアはキャリブレーション点から描画するため、家具の旧データはスキップ
         if (furniture.type === 'door' as any) {
@@ -1226,7 +1095,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
     // デバイスの位置を描画（最前面）
     if (devicePositions.size > 0) {
-      console.log("Drawing devices:", devicePositions.size);
       devicePositions.forEach((position, deviceId) => {
         const device = devices.find((d) => d.devEUI === deviceId);
 
@@ -1309,16 +1177,9 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
     setInfoIconPositions(iconPositions);
 
-    console.log("Room drawing completed");
   };
 
   useEffect(() => {
-    console.log(
-      "Drawing trigger - roomProfile:",
-      !!roomProfile,
-      "devices:",
-      devicePositions.size
-    );
     if (roomProfile) {
       // 少し遅延させて確実に描画
       const timer = setTimeout(() => {
