@@ -262,9 +262,7 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '24px', fontSize: '32px', fontWeight: '700' }}>
-        機能3: 屋外GPS追跡
-      </h1>
+      {/* 機能見出しは不要のため削除 */}
 
       {/* 警告表示 */}
       {alerts.map((alert, index) => (

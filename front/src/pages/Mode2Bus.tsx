@@ -618,12 +618,9 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
 
   return (
     <div style={{ 
-      maxWidth: '1400px',
-      margin: '0 auto'
-    }}>
-      <h1 style={{ fontSize: "32px", fontWeight: "700", margin: 0, marginBottom: '24px' }}>
-        機能2 : バス置き去り検知
-      </h1>
+      maxWidth: '1400px', margin: '0 auto'}}>
+      {/* 機能見出しは不要のため削除 */}
+      
       {/* 警告メッセージ */}
       {alertMessage && (
         <div style={{

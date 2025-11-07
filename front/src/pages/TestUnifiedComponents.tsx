@@ -82,6 +82,62 @@ export default function Dashboard() {
   const [showAllDevices, setShowAllDevices] = useState(false);
   const [busDeviceAlertThreshold, setBusDeviceAlertThreshold] = useState(1); // バス内デバイス数の警告閾値
 
+  const normalizeTimestampToIso = useCallback((value: unknown): string | null => {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const millis = value > 1e12 ? value : value * 1000; // 秒かミリ秒かを推定
+      const parsed = new Date(millis);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    return null;
+  }, []);
+
+  const extractBeaconTimestampIso = useCallback((beacon: any): string | null => {
+    if (!beacon) {
+      return null;
+    }
+
+    const candidates: Array<unknown> = [
+      beacon.timestamp,
+      beacon.ts,
+      beacon.time,
+      beacon.timeStamp,
+      beacon.scanTime,
+      beacon.scan_time,
+      beacon.receivedAt,
+      beacon.received_at,
+      beacon.lastSeen,
+      beacon.last_seen,
+      beacon.updatedAt,
+      beacon.updated_at,
+      beacon.createdAt,
+      beacon.created_at,
+      beacon.utc_iso,
+      beacon.utc,
+      beacon.iso,
+      beacon.isoTime,
+      beacon.iso_time
+    ];
+
+    for (const candidate of candidates) {
+      const iso = normalizeTimestampToIso(candidate);
+      if (iso) {
+        return iso;
+      }
+    }
+
+    return null;
+  }, [normalizeTimestampToIso]);
+
   // 🔧 RSSI から距離を推定する関数
   const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): number => {
     if (rssi === 0) return -1;
@@ -276,7 +332,7 @@ export default function Dashboard() {
     },
     gps: {
       title: 'GPS検知',
-      description: '屋外での高精度位置追跡',
+      description: '屋外での位置追跡',
       color: '#4CAF50',
       icon: ''
     }
@@ -395,14 +451,28 @@ export default function Dashboard() {
                     const selectedBeaconData = beaconsData.find(b => 
                       b.mac && b.mac.toUpperCase().replace(/:/g, "") === normalizedMac
                     );
+
+                    const timestampIso = extractBeaconTimestampIso(beacon) || new Date().toISOString();
                     
                     return {
                       beaconId: selectedBeaconData?.id || selectedBeacon,
                       rssi: beacon.rssi,
-                      timestamp: new Date().toISOString(),
+                      timestamp: timestampIso,
                       mac: normalizedMac
                     };
                   });
+
+                const latestBleTimestampIso = bleData.reduce<string | null>((latest, ble) => {
+                  if (!ble.timestamp) {
+                    return latest;
+                  }
+                  if (!latest) {
+                    return ble.timestamp;
+                  }
+                  return new Date(ble.timestamp).getTime() > new Date(latest).getTime()
+                    ? ble.timestamp
+                    : latest;
+                }, null);
 
                 let shouldTriggerUpdate = false;
 
@@ -419,7 +489,10 @@ export default function Dashboard() {
                       
                       if (hasRealChange) {
                         hasDeviceChanged = true;
-                        return { ...d, bleData, lastUpdate: new Date() };
+                        const resolvedLastUpdate = latestBleTimestampIso
+                          ? new Date(latestBleTimestampIso)
+                          : d.lastUpdate || new Date();
+                        return { ...d, bleData, lastUpdate: resolvedLastUpdate };
                       }
                       return d;
                     }

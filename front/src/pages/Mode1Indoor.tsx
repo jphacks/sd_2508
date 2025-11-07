@@ -90,6 +90,28 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     timestamp: number;
   }>>([]);
 
+  // 🔥 相対時刻を定期的に更新するための状態フラグ
+  const [updateTicker, setUpdateTicker] = useState(0);
+
+  const normalizeTimestampToIso = useCallback((value: unknown): string | null => {
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const millis = value > 1e12 ? value : value * 1000;
+      const parsed = new Date(millis);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    return null;
+  }, []);
+
   // 🔥 デフォルトルーム選択のuseEffectを追加
   useEffect(() => {
     if (availableRooms.length > 0 && !roomProfile) {
@@ -157,6 +179,15 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     };
   }, [cleanupRtdbListeners]);
 
+  // 🔥 相対時刻を定期的に更新するための useEffect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setUpdateTicker(prev => prev + 1);
+    }, 1000); // 1秒ごとに更新
+
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     setShowRssiOverlay(params.has("rssi"));
@@ -212,6 +243,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         setRoomProfile(selectedRoom);
       }
       
+      // 🔧 roomProfile が設定されたことを確実に把握するため、コールバック関数を使用
       setIsInitialized(true);
       setLoading(false);
       
@@ -353,6 +385,8 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     }
 
     // BLEデータがある場合の位置推定
+    let latestBleTimestampIso: string | null = null;
+
     if (device.bleData && device.bleData.length > 0) {
       // 🔥 BLEScanデータの構築（詳細ログ付き）
       const latestScan: BLEScan = {
@@ -376,6 +410,14 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       // ビーコンシグナル更新
       const signals: BeaconSignal[] = device.bleData.map(ble => {
         const beaconInfo = getBeaconInfo(ble.mac);
+
+        const bleTimestampIso = normalizeTimestampToIso((ble as any).timestamp);
+        if (bleTimestampIso) {
+          if (!latestBleTimestampIso || new Date(bleTimestampIso).getTime() > new Date(latestBleTimestampIso).getTime()) {
+            latestBleTimestampIso = bleTimestampIso;
+          }
+        }
+
         return {
           beaconId: beaconInfo?.beaconId || ble.beaconId || ble.mac,
           mac: ble.mac,
@@ -394,11 +436,33 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     }
 
     // 最終更新時刻の更新
-    if (device.lastUpdate) {
-      const timestamp = device.lastUpdate.toISOString();
-      setDeviceTimestamps(prev => new Map(prev.set(device.devEUI, timestamp)));
+    if (!latestBleTimestampIso && device.lastUpdate) {
+      latestBleTimestampIso = device.lastUpdate.toISOString();
     }
-  }, [roomProfile, processStatusData]);
+
+    if (latestBleTimestampIso) {
+      setDeviceTimestamps(prev => new Map(prev.set(device.devEUI, latestBleTimestampIso!)));
+    }
+  }, [roomProfile, processStatusData, normalizeTimestampToIso]);
+
+  // 🔥 roomProfile が設定された後に、外部デバイスを強制的に再処理する
+  useEffect(() => {
+    if (!roomProfile || !externalDevices || externalDevices.length === 0) {
+      return;
+    }
+
+    // ログで確認
+    console.log('🔄 roomProfile が設定されたため、外部デバイスを再処理します', {
+      roomName: roomProfile.name,
+      deviceCount: externalDevices.length,
+      hasCalibrationPoints: !!roomProfile.calibrationPoints
+    });
+
+    // 全外部デバイスを処理
+    externalDevices.forEach((device) => {
+      processDeviceDataForMode1(device);
+    });
+  }, [roomProfile, externalDevices, processDeviceDataForMode1]);
 
   // 🔥 外部データ処理を初期化完了後に実行
   useEffect(() => {
@@ -560,7 +624,8 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     }
   }, []);
 
-  const formatTimestamp = (timestamp: string): string => {
+  // 🔥 formatTimestamp を useCallback に変更し、updateTicker を依存配列に追加
+  const formatTimestamp = useCallback((timestamp: string): string => {
     try {
       const date = new Date(timestamp);
       const now = new Date();
@@ -588,7 +653,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     } catch {
       return "不明";
     }
-  };
+  }, [updateTicker]);
 
   useEffect(() => {
     if (roomProfile && canvasRef.current) {
@@ -1200,64 +1265,9 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "24px",
-          flexWrap: "wrap",
-          gap: "12px",
-        }}
-      >
-        <h1 style={{ fontSize: "32px", fontWeight: "700", margin: 0 }}>
-          機能1 : 室内位置追跡
-        </h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <h2
-            style={{
-              fontSize: "24px",
-              fontWeight: "600",
-              color: "#2c3e50",
-              margin: 0,
-            }}
-          >
-            部屋: {roomProfile?.name || "未設定"}
-          </h2>
-          <button
-            onClick={() => setShowLogPanel(!showLogPanel)}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "8px",
-              border: "2px solid #4A90E2",
-              backgroundColor: showLogPanel ? "#4A90E2" : "white",
-              color: showLogPanel ? "white" : "#4A90E2",
-              fontSize: "14px",
-              fontWeight: "600",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
-          >
-            ビーコンログ
-            {beaconLogs.length > 0 && (
-              <span
-                style={{
-                  backgroundColor: "#ff6b35",
-                  color: "white",
-                  borderRadius: "10px",
-                  padding: "2px 6px",
-                  fontSize: "12px",
-                  fontWeight: "bold",
-                }}
-              >
-                {beaconLogs.length}
-              </span>
-            )}
-          </button>
-        </div>
+      <div>
+        {/* 機能見出しは不要のため削除 */}
+        {/* ヘッダー上の部屋表示はキャンバス右上へ移動しました */}
       </div>
 
       {/* Shock検知モーダル */}
@@ -1492,12 +1502,50 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
                 </div>
               );
             })}
+
+            {/* ビーコンログ表示ボタン: ユーザーパネルの下部に移動 */}
+            <div style={{ padding: '12px', borderTop: '1px solid #e1e8ed', display: 'flex', justifyContent: 'flex-start' }}>
+              <button
+                onClick={() => setShowLogPanel(!showLogPanel)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '2px solid #4A90E2',
+                  backgroundColor: showLogPanel ? '#4A90E2' : 'white',
+                  color: showLogPanel ? 'white' : '#4A90E2',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                ビーコンログ
+                {beaconLogs.length > 0 && (
+                  <span
+                    style={{
+                      backgroundColor: '#ff6b35',
+                      color: 'white',
+                      borderRadius: '10px',
+                      padding: '2px 6px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      marginLeft: '8px'
+                    }}
+                  >
+                    {beaconLogs.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
         {/* 右側: 部屋表示パネル */}
         <div className="card" style={{ flex: 1, minWidth: 0 }}>
-          <div className="canvas-container" style={{ maxWidth: "100%" }}>
+          <div className="canvas-container" style={{ maxWidth: "100%", position: 'relative' }}>
             <div className="canvas-wrapper">
               <canvas
                 ref={canvasRef}
@@ -1510,6 +1558,22 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
                   display: "block",
                 }}
               />
+            </div>
+            {/* キャンバス右上に部屋名を表示 */}
+            <div style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              zIndex: 20,
+              backgroundColor: 'white',
+              padding: '8px 12px',
+              borderRadius: '10px',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.06)',
+              fontSize: '16px',
+              fontWeight: 700,
+              color: '#2c3e50'
+            }}>
+              部屋: {roomProfile?.name || '未設定'}
             </div>
             {tooltip && (
               <div
