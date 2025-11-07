@@ -747,7 +747,7 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
                     
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '14px' }}>
                       <div>
-                        <strong>信号強度</strong>
+                        {/* <strong>信号強度</strong> */}
                         <div style={{ marginTop: '4px' }}>
                           <div style={{
                             fontSize: '16px',

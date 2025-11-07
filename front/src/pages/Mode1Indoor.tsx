@@ -451,12 +451,11 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       return;
     }
 
-    // ログで確認
-    console.log('🔄 roomProfile が設定されたため、外部デバイスを再処理します', {
-      roomName: roomProfile.name,
-      deviceCount: externalDevices.length,
-      hasCalibrationPoints: !!roomProfile.calibrationPoints
-    });
+    // console.log('🔄 roomProfile が設定されたため、外部デバイスを再処理します', {
+    //   roomName: roomProfile.name,
+    //   deviceCount: externalDevices.length,
+    //   hasCalibrationPoints: !!roomProfile.calibrationPoints
+    // });
 
     // 全外部デバイスを処理
     externalDevices.forEach((device) => {
@@ -569,43 +568,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       }
     }
 
-    const alertId = `exit_room-${device.devEUI}`;
-    
-    if (!isInside) {
-      const alert: Alert = {
-        id: alertId,
-        type: "exit_room",
-        message: `${device.userName || device.deviceId} が部屋から出たようです！`,
-        deviceId: device.devEUI,
-        deviceName: device.userName,
-        timestamp: new Date().toISOString(),
-        dismissed: false,
-        mode: 'indoor'
-      };
-
-      let shouldScheduleCleanup = false;
-      setAlerts((prev) => {
-        if (prev.some((a) => a.id === alertId)) {
-          return prev;
-        }
-        shouldScheduleCleanup = true;
-        return [...prev, alert];
-      });
-
-      if (shouldScheduleCleanup) {
-        if (audioRef.current) {
-          audioRef.current.play();
-        }
-
-        // 5秒後に自動で消す
-        setTimeout(() => {
-          setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-        }, 5000);
-      }
-    } else {
-      // 部屋内に戻った場合はアラートを即座に削除
-      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
-    }
     return isInside;
   };
 

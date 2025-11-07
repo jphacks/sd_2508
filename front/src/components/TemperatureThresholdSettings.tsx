@@ -74,7 +74,7 @@ export default function TemperatureThresholdSettingsComponent() {
         fontWeight: '600', 
         marginBottom: '20px'
       }}>
-        温度閾値設定
+        温度設定
       </h2>
 
       <div style={{ marginBottom: '24px' }}>

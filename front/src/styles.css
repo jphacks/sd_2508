@@ -312,9 +312,18 @@ canvas {
 .header-content {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 0 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* ロゴコンテナ（画像とテキストを並べる） */
+.logo-container {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  text-decoration: none;
 }
 
 .logo {
@@ -322,6 +331,16 @@ canvas {
   font-weight: 700;
   color: var(--primary-color);
   text-decoration: none;
+  margin: 0;
+}
+
+/* ヘッダー用ロゴ画像 */
+.logo-image {
+  width: 38px;
+  height: auto;
+  object-fit: contain;
+  margin-right: 12px;
+  border-radius: 6px;
 }
 
 /* ナビゲーション */

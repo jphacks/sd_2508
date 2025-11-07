@@ -89,9 +89,13 @@ function App() {
       <div className="app">
         <header className="header">
           <div className="header-content">
-            <Link to="/" className="logo">
-              見守りシステム mimoca
-            </Link>
+            {/* og_image.png とロゴテキストを一つのコンテナに */}
+            <div className="logo-container">
+              <img src="/og_image.png" alt="mimoca" className="logo-image" />
+              <Link to="/" className="logo">
+                見守りシステム mimoca
+              </Link>
+            </div>
             <NavBar onLogout={handleLogout} />
           </div>
         </header>
@@ -138,7 +142,7 @@ function NavBar({ onLogout }: { onLogout: () => void }) {
         デバイス登録
       </Link>
       <Link to="/calibration" className={`nav-link ${isActive('/calibration') ? 'active' : ''}`}>
-        キャリブレーション
+        設定
       </Link>
       <button onClick={onLogout} className="nav-link logout-button">
         ログアウト
