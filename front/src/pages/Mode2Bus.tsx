@@ -570,7 +570,6 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
         <h2>読み込み中...</h2>
-        <p>データを取得しています。しばらくお待ちください。</p>
       </div>
     );
   }

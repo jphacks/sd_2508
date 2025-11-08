@@ -962,10 +962,11 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div style={{ padding: '40px', textAlign: 'center' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔄</div>
+      <div className="loading-container">
+        <div className="loading-icon">
+          <img src="/og_image.png" alt="読み込み中" />
+        </div>
         <h2>読み込み中...</h2>
-        <p>データを取得しています。しばらくお待ちください。</p>
       </div>
     );
   }
