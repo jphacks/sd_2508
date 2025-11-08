@@ -457,15 +457,21 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     room: RoomProfile,
     forceOutside: boolean = false
   ): boolean => {
-    const margin = -0.5;
+    const configuredMargin =
+      typeof room.exitMargin === "number" && Number.isFinite(room.exitMargin)
+        ? room.exitMargin
+        : 0.5;
     const outlineWidth = room.outline?.width ?? 1;
     const outlineHeight = room.outline?.height ?? 1;
-    const isInside = forceOutside ? false : (
-      position.x >= -margin &&
-      position.x <= outlineWidth + margin &&
-      position.y >= -margin &&
-      position.y <= outlineHeight + margin
-    );
+    const marginX = Math.min(Math.max(configuredMargin, 0), outlineWidth / 2);
+    const marginY = Math.min(Math.max(configuredMargin, 0), outlineHeight / 2);
+
+    const isInside = forceOutside
+      ? false
+      : position.x >= marginX &&
+        position.x <= outlineWidth - marginX &&
+        position.y >= marginY &&
+        position.y <= outlineHeight - marginY;
 
     const normalizedDeviceId = device.devEUI?.toLowerCase();
     if (normalizedDeviceId) {

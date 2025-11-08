@@ -903,6 +903,7 @@ export default function Calibration() {
       beacons: selectedBeacons,
       calibrationPoints: calibrationPoints,
       outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
+      exitMargin: originalRoomData?.exitMargin ?? 0.5,
       furniture: furniture,
       beaconPositions: beaconPositionsArray, // ビーコン位置を保存
       createdAt: originalRoomData?.createdAt || new Date().toISOString(),

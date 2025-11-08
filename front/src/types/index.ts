@@ -175,6 +175,7 @@ export interface RoomProfile {
   calibrationPoints: CalibrationPoint[];
   outline?: { width: number; height: number };
   furniture?: FurnitureItem[];
+  exitMargin?: number;
   beaconPositions?: Array<{
     id: string;
     name: string;
