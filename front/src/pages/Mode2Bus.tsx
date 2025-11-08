@@ -182,7 +182,7 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
           if (isNaN(bleTimestamp.getTime())) return false;
           
           const timeSinceLastBle = currentTime.getTime() - bleTimestamp.getTime();
-          const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
+          const isRecentlyReceived = timeSinceLastBle < 30 * 60 * 1000;
           // 🔧 引数で受け取った値を使用
           const isWithinBusRange = latestBleData.rssi >= effectiveRssiThreshold;
           
@@ -505,7 +505,7 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
         if (isNaN(bleTimestamp.getTime())) return false;
         
         const timeSinceLastBle = now.getTime() - bleTimestamp.getTime();
-        const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
+        const isRecentlyReceived = timeSinceLastBle < 30 * 60 * 1000;
         const isWithinBusRange = latestBleData.rssi >= rssiThreshold;
         
         return isRecentlyReceived && isWithinBusRange;

@@ -306,7 +306,7 @@ export default function Dashboard() {
             const bleTimestamp = new Date(latestBleData.timestamp);
             if (!isNaN(bleTimestamp.getTime())) {
               const timeSinceLastBle = currentTime.getTime() - bleTimestamp.getTime();
-              const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000; // 5分以内
+              const isRecentlyReceived = timeSinceLastBle < 30 * 60 * 1000; // 30分以内
               
               // 🔧 引数で受け取った値を使用してリアルタイム判定
               const isWithinBusRange = latestBleData.rssi >= effectiveRssiThreshold;
@@ -680,7 +680,7 @@ export default function Dashboard() {
         const bleTimestamp = new Date(latestBleData.timestamp);
         if (!isNaN(bleTimestamp.getTime())) {
           const timeSinceLastBle = Date.now() - bleTimestamp.getTime();
-          const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000; // 5分以内
+          const isRecentlyReceived = timeSinceLastBle < 30 * 60 * 1000; // 30分以内
           const isWithinBusRange = latestBleData.rssi >= calculatedRssiThreshold;
           const estimatedDistance = estimateDistance(latestBleData.rssi);
 
@@ -699,7 +699,7 @@ export default function Dashboard() {
             };
           }
 
-          return { status: '受信タイムアウト', ...STATUS_COLORS.warning };
+          return { status: 'なし', ...STATUS_COLORS.inactive };
         }
       } catch (error) {
         console.error('バス状態のBLE判定エラー:', error);
@@ -1132,7 +1132,7 @@ export default function Dashboard() {
                             const bleTimestamp = new Date(latestBle.timestamp);
                             if (!isNaN(bleTimestamp.getTime())) {
                               const timeSinceLastBle = Date.now() - bleTimestamp.getTime();
-                              const isRecentlyReceived = timeSinceLastBle < 5 * 60 * 1000;
+                              const isRecentlyReceived = timeSinceLastBle < 30 * 60 * 1000;
                               const isWithinBusRange = latestBle.rssi >= calculatedRssiThreshold;
                               return isRecentlyReceived && isWithinBusRange;
                             }
