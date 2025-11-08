@@ -5,7 +5,6 @@ import { useLocation } from "react-router-dom";
 import { rtdb, db } from "../firebase";
 import { Device, BLEScan, RoomProfile, Alert, Beacon, CalibrationPoint } from "../types";
 import { estimatePositionHybrid } from "../utils/positioning";
-import ShockAlertModal from "../components/ShockAlertModal";
 
 // ビーコン受信ログの型定義
 interface BeaconLog {
@@ -65,7 +64,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   const [beaconLogs, setBeaconLogs] = useState<BeaconLog[]>([]);
   const [showLogPanel, setShowLogPanel] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
   const presenceStatusRef = useRef<Map<string, boolean>>(new Map());
   const rtdbUnsubscribesRef = useRef<(() => void)[]>([]);
   const [showRssiOverlay, setShowRssiOverlay] = useState(false);
@@ -81,14 +79,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     top: number;
     signals: BeaconSignal[];
   } | null>(null);
-
-  // 🔥 Shock検知アラートのリスト
-  const [shockAlerts, setShockAlerts] = useState<Array<{
-    id: string;
-    deviceId: string;
-    message: string;
-    timestamp: number;
-  }>>([]);
 
   // 🔥 相対時刻を定期的に更新するための状態フラグ
   const [updateTicker, setUpdateTicker] = useState(0);
@@ -254,37 +244,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     }
   };
 
-  
-
-
-  // ステータス処理（転倒検知など）
-  const processStatusData = useCallback((device: Device) => {
-    if (device.statusData?.shock === true) {
-      const deviceIdLower = device.devEUI.toLowerCase();
-      
-      // 既に同じデバイスのアラートが存在しないかチェック
-      setShockAlerts((prev) => {
-        const exists = prev.some(alert => alert.deviceId === deviceIdLower);
-        if (exists) {
-          console.warn(`⚠️ ${deviceIdLower} は既にアラートリストに存在します`);
-          return prev;
-        }
-
-        const newAlert = {
-          id: `${deviceIdLower}-${Date.now()}`,
-          deviceId: deviceIdLower,
-          message: `${device.userName || device.deviceId} が衝撃を検知しました！`,
-          timestamp: Date.now()
-        };
-
-        // 音声再生
-        if (audioRef.current) audioRef.current.play();
-
-        return [...prev, newAlert];
-      });
-    }
-  }, []);
-
   const performPositionEstimation = useCallback((device: Device, scan: BLEScan) => {
     try {
       if (!roomProfile?.calibrationPoints) {
@@ -430,11 +389,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       console.warn(`⚠️ Mode1 BLEデータなし: ${device.name}`);
     }
 
-    // ステータスデータがある場合の処理
-    if (device.statusData) {
-      processStatusData(device);
-    }
-
     // 最終更新時刻の更新
     if (!latestBleTimestampIso && device.lastUpdate) {
       latestBleTimestampIso = device.lastUpdate.toISOString();
@@ -443,7 +397,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     if (latestBleTimestampIso) {
       setDeviceTimestamps(prev => new Map(prev.set(device.devEUI, latestBleTimestampIso!)));
     }
-  }, [roomProfile, processStatusData, normalizeTimestampToIso]);
+  }, [roomProfile, normalizeTimestampToIso]);
 
   // 🔥 roomProfile が設定された後に、外部デバイスを強制的に再処理する
   useEffect(() => {
@@ -574,17 +528,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   const dismissAlert = (alertId: string) => {
     setAlerts((prev) => prev.filter((a) => a.id !== alertId));
   };
-
-  // 🔥 Shock検知を確認して、RTDBのshockフラグをfalseに更新
-  const handleShockAlertClose = useCallback(async (deviceId: string) => {
-    try {
-      await update(ref(rtdb, `devices/${deviceId}/status`), { shock: false });
-      // アラートリストから削除
-      setShockAlerts((prev) => prev.filter(alert => alert.deviceId !== deviceId));
-    } catch (error) {
-      console.error(`❌ Shock値の更新に失敗: ${error}`);
-    }
-  }, []);
 
   // 🔥 formatTimestamp を useCallback に変更し、updateTicker を依存配列に追加
   const formatTimestamp = useCallback((timestamp: string): string => {
@@ -1232,12 +1175,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         {/* ヘッダー上の部屋表示はキャンバス右上へ移動しました */}
       </div>
 
-      {/* Shock検知モーダル */}
-      <ShockAlertModal
-        alerts={shockAlerts}
-        onClose={handleShockAlertClose}
-      />
-
       {/* その他のアラート表示（shock以外） */}
       {alerts.filter(a => a.type !== 'shock').length > 0 && (
         <div className="alert-stack">
@@ -1600,12 +1537,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
           </div>
         </div>
       </div>
-
-      {/* アラート音 */}
-      <audio
-        ref={audioRef}
-        src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGmi78OScTgwOUKXh8bllHAU2jdXxxn0pBSl+zPLaizsKFFux6OyrWBgLTKXh8bxpIgU1gtDy04k3CBtmue7mnlENDlCn4fG2Yx0FNo3V8cV9KwUqfsvy2os6CxJbrefrqVYZCkyk4PG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Rrerlsl0dBTiO1/HGfSwHKn3L8tuKOwsTWbHn66hWGQpNpOHxvGknBjiCzfLYiDgIGWe47eWfTw8OUq3q5bJdHQU4jtfxxn0sByp9y/LbizsLE1mw5+uoVhkKTKTh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKs6eWyXRwGOI7X8cZ9LAcqfcvy24s7CxNZsOfrqFYZCkyk4fG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfSwHKn3L8tuKOwsTWbDn66hWGQpMo+HxvGknBjiCzfLYiDgIGWe47eWfTw8OUqvq5bJdHQU4jtfxxn0sByp9y/LbijsLE1mw5+uoVRkKTKPh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ9KwcqfMvy24o6CxNZr+frqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWa/n66hWGQpMouDxvGknBjiCzfLYiDkIGWe47eWfTw8OUqvq5bJdHAY4jtfxxnwrByp8y/LbijsLE1mw5+uoVhkKTKLg8bxpJwY4gs3y2Ig5CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ8KwcqfMvy24o6CxNZsOfrqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWbDn66hWGQpMouDxvGknBjiCzfLYiDgIGWe47eWfTw8OU="
-      />
     </div>
   );
 }

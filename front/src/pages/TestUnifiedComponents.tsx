@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ModeSelector from '../components/unified/ModeSelector';
 import ErrorBoundary from '../components/common/ErrorBoundary';
+import ShockAlertModal from '../components/ShockAlertModal';
 import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition, TemperatureThresholdSettings } from '../types';
 import { 
   collection, 
@@ -47,6 +48,13 @@ const STATUS_COLORS = {
   highTempBg: '#ffebee'
 } as const;
 
+type ShockAlertEntry = {
+  id: string;
+  deviceId: string;
+  message: string;
+  timestamp: number;
+};
+
 const createJstTimestamp = () => {
   const now = new Date();
   const jstOffsetMinutes = 9 * 60;
@@ -83,6 +91,9 @@ export default function Dashboard() {
   const [connectionTimeout, setConnectionTimeout] = useState(10);
   const [showAllDevices, setShowAllDevices] = useState(false);
   const [busDeviceAlertThreshold, setBusDeviceAlertThreshold] = useState(1); // バス内デバイス数の警告閾値
+  const [shockAlerts, setShockAlerts] = useState<ShockAlertEntry[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const shockAlertsRef = useRef<ShockAlertEntry[]>([]);
 
   const [gpsMaxDistance, setGpsMaxDistance] = useState(30);
   const [baseLocation, setBaseLocation] = useState<{ lat: number; lon: number } | null>(null);
@@ -98,6 +109,63 @@ export default function Dashboard() {
     }, 1000);
 
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    shockAlertsRef.current = shockAlerts;
+  }, [shockAlerts]);
+
+  useEffect(() => {
+    if (devices.length === 0 && shockAlertsRef.current.length === 0) {
+      return;
+    }
+
+    const prevAlerts = shockAlertsRef.current;
+    const prevMap = new Map(prevAlerts.map(alert => [alert.deviceId, alert]));
+    const nextAlerts: ShockAlertEntry[] = [];
+    let hasNewAlert = false;
+
+    devices.forEach(device => {
+      const normalizedDevEUI = device.devEUI?.toLowerCase();
+      const hasShock = device.statusData?.shock === true;
+      
+      if (!normalizedDevEUI || !hasShock) {
+        return;
+      }
+
+      const existingAlert = prevMap.get(normalizedDevEUI);
+      if (existingAlert) {
+        nextAlerts.push(existingAlert);
+        return;
+      }
+
+      const newAlert: ShockAlertEntry = {
+        id: `${normalizedDevEUI}-${Date.now()}`,
+        deviceId: normalizedDevEUI,
+        message: `${device.userName || device.deviceId || device.name || normalizedDevEUI} が衝撃を検知しました！`,
+        timestamp: Date.now()
+      };
+
+      nextAlerts.push(newAlert);
+      hasNewAlert = true;
+    });
+
+    setShockAlerts(nextAlerts);
+
+    if (hasNewAlert && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch((error) => {
+        console.warn('⚠️ ショックアラート音の再生に失敗:', error);
+      });
+    }
+  }, [devices]);
+
+  const handleShockAlertClose = useCallback(async (deviceId: string) => {
+    try {
+      await update(ref(rtdb, `devices/${deviceId}/status`), { shock: false });
+    } catch (error) {
+      console.error(`❌ Shock値の更新に失敗: ${error}`);
+    }
   }, []);
 
   const normalizeTimestampToIso = useCallback((value: unknown): string | null => {
@@ -929,6 +997,10 @@ export default function Dashboard() {
 
   return (
     <ErrorBoundary>
+      <ShockAlertModal
+        alerts={shockAlerts}
+        onClose={handleShockAlertClose}
+      />
       <div style={{ 
         padding: '24px', 
         backgroundColor: '#f8f9fa',
@@ -1355,6 +1427,10 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      <audio
+        ref={audioRef}
+        src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIGmi78OScTgwOUKXh8bllHAU2jdXxxn0pBSl+zPLaizsKFFux6OyrWBgLTKXh8bxpIgU1gtDy04k3CBtmue7mnlENDlCn4fG2Yx0FNo3V8cV9KwUqfsvy2os6CxJbrefrqVYZCkyk4PG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Rrerlsl0dBTiO1/HGfSwHKn3L8tuKOwsTWbHn66hWGQpNpOHxvGknBjiCzfLYiDgIGWe47eWfTw8OUq3q5bJdHQU4jtfxxn0sByp9y/LbizsLE1mw5+uoVhkKTKTh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKs6eWyXRwGOI7X8cZ9LAcqfcvy24s7CxNZsOfrqFYZCkyk4fG8aScGOILN8tiIOAgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfSwHKn3L8tuKOwsTWbDn66hWGQpMo+HxvGknBjiCzfLYiDgIGWe47eWfTw8OUqvq5bJdHQU4jtfxxn0sByp9y/LbijsLE1mw5+uoVRkKTKPh8bxpJwY4gs3y2Ig4CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ9KwcqfMvy24o6CxNZr+frqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWa/n66hWGQpMouDxvGknBjiCzfLYiDkIGWe47eWfTw8OUqvq5bJdHAY4jtfxxnwrByp8y/LbijsLE1mw5+uoVhkKTKLg8bxpJwY4gs3y2Ig5CBlnuO3ln08PDlKr6uWyXRwGOI7X8cZ8KwcqfMvy24o6CxNZsOfrqFYZCkyi4PG8aScGOILN8tiIOQgZZ7jt5Z9PDw5Sq+rlsl0cBjiO1/HGfCsHKnzL8tuKOgsTWbDn66hWGQpMouDxvGknBjiCzfLYiDgIGWe47eWfTw8OU="
+      />
     </ErrorBoundary>
   );
 }
