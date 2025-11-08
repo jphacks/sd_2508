@@ -4,13 +4,7 @@ import ModeSelector from '../components/unified/ModeSelector';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import ShockAlertModal from '../components/ShockAlertModal';
 import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition, TemperatureThresholdSettings } from '../types';
-import { 
-  collection, 
-  getDocs,
-  getDoc,
-  where,
-  doc as firestoreDoc
-} from 'firebase/firestore';
+import { collection, onSnapshot, doc as firestoreDoc, updateDoc, setDoc, getDocs, getDoc, deleteField } from 'firebase/firestore';
 import { ref, onValue, update, get } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { calculateGPSDistance } from '../utils/positioning';
@@ -223,6 +217,26 @@ export default function Dashboard() {
 
     return null;
   }, [normalizeTimestampToIso]);
+
+  // Firestoreから基準位置を読み込む
+  useEffect(() => {
+    const loadBaseLocation = async () => {
+      try {
+        const { getDoc, doc } = await import('firebase/firestore');
+        const baseLocationDoc = await getDoc(doc(db, 'settings', 'base_location'));
+        if (baseLocationDoc.exists()) {
+          const data = baseLocationDoc.data();
+          if (data && typeof data.lat === 'number' && typeof data.lon === 'number') {
+            setBaseLocation({ lat: data.lat, lon: data.lon });
+          }
+        }
+      } catch (error) {
+        console.error('基準位置の読み込みエラー:', error);
+      }
+    };
+
+    loadBaseLocation();
+  }, []);
 
   // 🔧 RSSI から距離を推定する関数
   const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): number => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { MapContainer, TileLayer, Marker, Circle, Popup, Polyline, Tooltip, useMapEvent } from 'react-leaflet';
 import L from 'leaflet';
@@ -105,6 +105,33 @@ export default function Mode3GPS({
   const [baseLocationDistance, setBaseLocationDistance] = useState(externalBaseLocationDistance);
   const [isSettingBaseLocation, setIsSettingBaseLocation] = useState(false);
 
+  // Firestoreから基準位置を読み込む
+  useEffect(() => {
+    const loadBaseLocation = async () => {
+      try {
+        const baseLocationDoc = await getDoc(doc(db, 'settings', 'base_location'));
+        if (baseLocationDoc.exists()) {
+          const data = baseLocationDoc.data();
+          if (data && typeof data.lat === 'number' && typeof data.lon === 'number') {
+            const location = { lat: data.lat, lon: data.lon };
+            setBaseLocation(location);
+            // 外部コールバックがあれば通知
+            if (onBaseLocationChange) {
+              onBaseLocationChange(location);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('基準位置の読み込みエラー:', error);
+      }
+    };
+
+    // 外部から渡されていない場合のみFirestoreから読み込む
+    if (!externalBaseLocation) {
+      loadBaseLocation();
+    }
+  }, []);
+
   // 重複するuseEffectを削除し、外部データ依存に変更
   useEffect(() => {
     if (externalDevices) {
@@ -131,6 +158,8 @@ export default function Mode3GPS({
       setTrackers(externalDevices);
     }
   }, [externalDevices]);
+
+
 
   // 重複するloadDevicesAndGPS関数を簡素化（独立使用時のみ）
   const loadDevicesAndGPS = async () => {
@@ -303,11 +332,36 @@ export default function Mode3GPS({
     });
   }, [onParentTrackersChange]);
 
+  // 基準位置をFirestoreに保存する関数
+  const saveBaseLocationToFirestore = async (location: { lat: number; lon: number } | null) => {
+    try {
+      if (location) {
+        await setDoc(doc(db, 'settings', 'base_location'), {
+          lat: location.lat,
+          lon: location.lon,
+          updatedAt: new Date().toISOString()
+        });
+        console.log('基準位置を保存しました:', location);
+      } else {
+        // nullの場合は削除（またはフラグを立てる）
+        await setDoc(doc(db, 'settings', 'base_location'), {
+          lat: null,
+          lon: null,
+          updatedAt: new Date().toISOString()
+        });
+        console.log('基準位置をクリアしました');
+      }
+    } catch (error) {
+      console.error('基準位置の保存エラー:', error);
+    }
+  };
+
   const MapClickHandler = () => {
     useMapEvent('click', (e) => {
       if (isSettingBaseLocation) {
         const newLocation = { lat: e.latlng.lat, lon: e.latlng.lng };
         setBaseLocation(newLocation);
+        saveBaseLocationToFirestore(newLocation); // Firestoreに保存
         if (onBaseLocationChange) {
           onBaseLocationChange(newLocation);
         }
@@ -499,6 +553,7 @@ export default function Mode3GPS({
                     <button
                       onClick={() => {
                         setBaseLocation(null);
+                        saveBaseLocationToFirestore(null);
                         if (onBaseLocationChange) {
                           onBaseLocationChange(null);
                         }
