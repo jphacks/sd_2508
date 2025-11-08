@@ -11,6 +11,7 @@ export default function EditRoom() {
   const [room, setRoom] = useState<RoomProfile | null>(null);
   const [roomWidth, setRoomWidth] = useState<string>('');
   const [roomHeight, setRoomHeight] = useState<string>('');
+  const [exitMargin, setExitMargin] = useState<string>('0.5');
   const [loading, setLoading] = useState(true);
   const [beaconMap, setBeaconMap] = useState<{ [key: string]: Beacon }>({});
 
@@ -47,6 +48,11 @@ export default function EditRoom() {
           setRoomWidth(roomData.outline.width.toString());
           setRoomHeight(roomData.outline.height.toString());
         }
+        if (typeof roomData.exitMargin === 'number') {
+          setExitMargin(roomData.exitMargin.toString());
+        } else {
+          setExitMargin('0.5');
+        }
       } else {
         alert('ルームが見つかりません');
         navigate('/management');
@@ -68,12 +74,18 @@ export default function EditRoom() {
       alert('有効な部屋サイズを入力してください');
       return;
     }
+    const parsedMargin = exitMargin !== '' ? parseFloat(exitMargin) : 0.5;
+    if (!Number.isFinite(parsedMargin) || parsedMargin < 0) {
+      alert('有効な退室マージンを入力してください（0以上の値）');
+      return;
+    }
 
     try {
       const updateData: Partial<RoomProfile> = {
         outline: parsedWidth && parsedHeight 
           ? { width: parsedWidth, height: parsedHeight }
           : undefined,
+        exitMargin: parsedMargin,
         updatedAt: new Date().toISOString()
       };
 
@@ -190,6 +202,23 @@ export default function EditRoom() {
             >
               {room.outline ? 'サイズを更新' : 'サイズを設定'}
             </button>
+          </div>
+          <div style={{ marginBottom: '8px' }}>
+            <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px', fontWeight: '600' }}>
+              退室判定マージン（メートル）
+            </label>
+            <input
+              type="number"
+              className="form-input"
+              placeholder="例: 0.5"
+              value={exitMargin}
+              onChange={(e) => setExitMargin(e.target.value)}
+              step="0.1"
+              min="0"
+            />
+            <p style={{ fontSize: '12px', color: '#7f8c8d', marginTop: '4px' }}>
+              室内判定に使う境界からの余白です。値を大きくすると退室判定が厳しくなります。
+            </p>
           </div>
         </div>
 

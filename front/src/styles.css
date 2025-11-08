@@ -917,3 +917,43 @@ canvas {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ローディングアニメーション */
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  min-height: 400px;
+}
+
+.loading-icon {
+  animation: spin 2s linear infinite;
+  margin-bottom: 16px;
+}
+
+.loading-icon img {
+  width: 80px;
+  height: 80px;
+  display: block;
+}

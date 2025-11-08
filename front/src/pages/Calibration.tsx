@@ -903,6 +903,7 @@ export default function Calibration() {
       beacons: selectedBeacons,
       calibrationPoints: calibrationPoints,
       outline: originalRoomData?.outline || { width: TEST_ROOM.width, height: TEST_ROOM.height },
+      exitMargin: originalRoomData?.exitMargin ?? 0.5,
       furniture: furniture,
       beaconPositions: beaconPositionsArray, // ビーコン位置を保存
       createdAt: originalRoomData?.createdAt || new Date().toISOString(),
@@ -917,7 +918,7 @@ export default function Calibration() {
         
         // 家具編集モードの場合は EditRoom に戻る
         if (isFurnitureEditMode) {
-          navigate(`/edit-room/${roomId}`);
+          navigate('/calibration');
         } else {
           navigate('/mode1');
         }
@@ -1793,54 +1794,6 @@ export default function Calibration() {
         <div style={{ display: 'flex', gap: '24px', flexDirection: window.innerWidth <= 768 ? 'column' : 'row' }}>
           {/* 左側: コントロールパネル */}
           <div style={{ width: window.innerWidth <= 768 ? '100%' : '300px' }}>
-            {(isEditMode || isFurnitureEditMode) && (
-              <div className="card" style={{ marginBottom: '16px', backgroundColor: '#FFF3CD', border: '1px solid #FFEAA7' }}>
-                <h3 style={{ marginBottom: '12px', color: '#856404' }}>編集モード</h3>
-                <p style={{ fontSize: '14px', color: '#856404', margin: 0 }}>
-                  「{roomName}」の家具配置を編集しています
-                </p>
-              </div>
-            )}
-
-
-
-            <div className="card" style={{ marginBottom: '16px' }}>
-              <h3 style={{ marginBottom: '16px' }}>部屋サイズ（オプション）</h3>
-              <p style={{ fontSize: '14px', color: '#7f8c8d', marginBottom: '12px' }}>
-                未入力の場合は、0~1の正規化座標で保存されます。
-              </p>
-              <div style={{ display: 'flex', gap: '12px', marginBottom: '8px' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>
-                    幅（メートル）
-                  </label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder="例: 10"
-                    value={roomWidth}
-                    onChange={(e) => setRoomWidth(e.target.value)}
-                    step="0.1"
-                    min="0"
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '14px', marginBottom: '4px' }}>
-                    高さ（メートル）
-                  </label>
-                  <input
-                    type="number"
-                    className="form-input"
-                    placeholder="例: 8"
-                    value={roomHeight}
-                    onChange={(e) => setRoomHeight(e.target.value)}
-                    step="0.1"
-                    min="0"
-                  />
-                </div>
-              </div>
-            </div>
-
             <div className="card" style={{ marginBottom: '16px' }}>
               <h3 style={{ marginBottom: '16px' }}>家具を追加</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
