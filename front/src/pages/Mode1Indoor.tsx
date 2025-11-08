@@ -680,8 +680,10 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
 
     const roomWidth = roomProfile.outline?.width ?? 1;
     const roomHeight = roomProfile.outline?.height ?? 1;
-    const exitSpaceDepth = 1.0; // 奥行き1m
-    const exitSpaceWidth = 1.0; // 横幅1m
+    const longestSide = Math.max(roomWidth, roomHeight);
+    const exitSpaceSize = Math.max(longestSide * 0.1, 0.5);
+    const exitSpaceDepth = exitSpaceSize; // 奥行き
+    const exitSpaceWidth = exitSpaceSize; // 横幅
 
     // 退室スペースを含めた描画範囲を計算
     const exitSpaceMargin = exitSpaceDepth;
@@ -697,6 +699,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     let doorInsideActual: { x: number; y: number } | null = null;
     let doorOutsideActual: { x: number; y: number } | null = null;
     let doorNormal: { x: number; y: number } | null = null;
+    let doorCenter: { x: number; y: number } | null = null;
     
     if (doorOutside && doorInside) {
       doorInsideActual = {
@@ -715,6 +718,10 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       doorNormal = {
         x: doorVectorX / doorVectorLength,
         y: doorVectorY / doorVectorLength
+      };
+      doorCenter = {
+        x: (doorInsideActual.x + doorOutsideActual.x) / 2,
+        y: (doorInsideActual.y + doorOutsideActual.y) / 2
       };
       
       // 退室スペースの最大範囲を計算（実寸）
@@ -751,12 +758,12 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     // 退室スペースの背景を描画（薄い赤色）
-    if (doorInsideActual && doorOutsideActual && doorNormal) {
+    if (doorInsideActual && doorOutsideActual && doorNormal && doorCenter) {
       ctx.fillStyle = "rgba(255, 107, 53, 0.1)";
       
       // ドアの中心位置を計算（ドアの描画と同じ位置）
-      const doorCenterX = (doorInsideActual.x + doorOutsideActual.x) / 2;
-      const doorCenterY = (doorInsideActual.y + doorOutsideActual.y) / 2;
+      const doorCenterX = doorCenter.x;
+      const doorCenterY = doorCenter.y;
       const doorThickness = 0.05;
 
       const exitX = (doorCenterX + offsetX) * scale + padding;
@@ -1046,6 +1053,21 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     }
 
     const iconPositions = new Map<string, { x: number; y: number; radius: number }>();
+    const outsideDevices = devices
+      .filter((device) => {
+        if (!device.devEUI) {
+          return false;
+        }
+        const normalized = device.devEUI.toLowerCase();
+        return presenceStatusRef.current.get(normalized) === false;
+      })
+      .map((device) => device.devEUI);
+    const outsideIndexMap = new Map<string, number>();
+    outsideDevices.forEach((id, index) => {
+      if (id) {
+        outsideIndexMap.set(id, index);
+      }
+    });
 
     // デバイスの位置を描画（最前面）
     if (devicePositions.size > 0) {
@@ -1053,8 +1075,39 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         const device = devices.find((d) => d.devEUI === deviceId);
 
         // 位置座標を変換：position.x/yは既に実際のメートル位置
-        const displayX = position.x;
-        const displayY = position.y;
+        let displayX = position.x;
+        let displayY = position.y;
+
+        if (deviceId) {
+          const normalized = deviceId.toLowerCase();
+          const isInside = presenceStatusRef.current.get(normalized);
+          const isOutside = isInside === false;
+
+          if (
+            isOutside &&
+            doorCenter &&
+            doorNormal
+          ) {
+            const outsideIndex = outsideIndexMap.get(deviceId) ?? 0;
+            const outsideCount = outsideDevices.length || 1;
+            const tangent = { x: -doorNormal.y, y: doorNormal.x };
+            const spacing = Math.max(exitSpaceWidth / Math.max(outsideCount, 1), 0.2);
+            const startOffset = (outsideCount - 1) / 2;
+            let tangentOffset = (outsideIndex - startOffset) * spacing;
+            const maxTangent = Math.max(exitSpaceWidth / 2 - 0.1, 0);
+            tangentOffset = Math.max(-maxTangent, Math.min(maxTangent, tangentOffset));
+            const depthOffset = exitSpaceDepth / 2 + 0.2;
+
+            displayX =
+              doorCenter.x +
+              doorNormal.x * depthOffset +
+              tangent.x * tangentOffset;
+            displayY =
+              doorCenter.y +
+              doorNormal.y * depthOffset +
+              tangent.y * tangentOffset;
+          }
+        }
 
         const x = padding + (displayX + offsetX) * scale;
         const y = padding + (displayY + offsetY) * scale;

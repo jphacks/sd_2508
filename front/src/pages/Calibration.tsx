@@ -918,7 +918,7 @@ export default function Calibration() {
         
         // 家具編集モードの場合は EditRoom に戻る
         if (isFurnitureEditMode) {
-          navigate(`/edit-room/${roomId}`);
+          navigate('/calibration');
         } else {
           navigate('/mode1');
         }
