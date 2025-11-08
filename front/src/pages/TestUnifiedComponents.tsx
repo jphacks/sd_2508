@@ -82,6 +82,18 @@ export default function Dashboard() {
   const [showAllDevices, setShowAllDevices] = useState(false);
   const [busDeviceAlertThreshold, setBusDeviceAlertThreshold] = useState(1); // バス内デバイス数の警告閾値
 
+  // リアルタイム更新用のstate（1秒ごとに経過時間を更新）
+  const [currentTime, setCurrentTime] = useState<Date>(new Date());
+
+  // 1秒ごとに現在時刻を更新
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const normalizeTimestampToIso = useCallback((value: unknown): string | null => {
     if (typeof value === 'string' && value.trim().length > 0) {
       const parsed = new Date(value);
@@ -414,8 +426,10 @@ export default function Dashboard() {
           const unsubStatus = onValue(statusRef, (snapshot) => {
           if (snapshot.exists()) {
             const status = snapshot.val();
+            // updatedAtから時刻を取得（形式: 2025-11-08T11:33:09+09:00）
+            const lastUpdate = status.updatedAt ? new Date(status.updatedAt) : new Date();
             setDevices(prev => prev.map(d => 
-              d.devEUI === device.devEUI ? { ...d, statusData: status, lastUpdate: new Date() } : d
+              d.devEUI === device.devEUI ? { ...d, statusData: status, lastUpdate } : d
             ));
             }
           });
@@ -429,8 +443,8 @@ export default function Dashboard() {
                 setDevices(prev => prev.map(d => 
                   d.devEUI === device.devEUI ? {
                     ...d,
-                    position: { lat: gnss.lat, lon: gnss.lon, timestamp: gnss.utc_iso },
-                    lastUpdate: new Date()
+                    position: { lat: gnss.lat, lon: gnss.lon, timestamp: gnss.utc_iso }
+                    // lastUpdateは更新しない（statusのupdatedAtのみを使用）
                   } : d
                 ));
               }
@@ -489,10 +503,8 @@ export default function Dashboard() {
                       
                       if (hasRealChange) {
                         hasDeviceChanged = true;
-                        const resolvedLastUpdate = latestBleTimestampIso
-                          ? new Date(latestBleTimestampIso)
-                          : d.lastUpdate || new Date();
-                        return { ...d, bleData, lastUpdate: resolvedLastUpdate };
+                        // lastUpdateは更新しない（statusのupdatedAtのみを使用）
+                        return { ...d, bleData };
                       }
                       return d;
                     }
@@ -883,8 +895,8 @@ export default function Dashboard() {
                       // 経過時間を計算
                       const getTimeAgo = (date: Date | null) => {
                         if (!date) return '';
-                        const now = new Date();
-                        const diffMs = now.getTime() - new Date(date).getTime();
+                        const diffMs = currentTime.getTime() - new Date(date).getTime();
+                        const diffSeconds = Math.floor(diffMs / 1000);
                         const diffMinutes = Math.floor(diffMs / (1000 * 60));
                         const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
                         const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -892,7 +904,7 @@ export default function Dashboard() {
                         if (diffDays > 0) return `${diffDays}日前`;
                         if (diffHours > 0) return `${diffHours}時間前`;
                         if (diffMinutes > 0) return `${diffMinutes}分前`;
-                        return '1分以内';
+                        return `${diffSeconds}秒前`;
                       };
 
                       return (
@@ -1095,8 +1107,6 @@ export default function Dashboard() {
                     onSelectedBeaconChange={handleSelectedBeaconChange}
                     rssiThreshold={rssiThreshold}
                     onRssiThresholdChange={handleRssiThresholdChange}
-                    alertThreshold={alertThreshold}
-                    onAlertThresholdChange={handleAlertThresholdChange}
                     alertEnabled={alertEnabled}
                     onAlertEnabledChange={handleAlertEnabledChange}
                     connectionTimeout={connectionTimeout}
