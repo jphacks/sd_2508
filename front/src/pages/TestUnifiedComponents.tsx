@@ -1290,7 +1290,7 @@ export default function Dashboard() {
                               <span style={{
                               padding: '6px 16px',
                               borderRadius: '20px',
-                              fontSize: '18px',
+                              fontSize: '20px',
                               fontWeight: 'bold',
                               backgroundColor: gpsStatus.bgColor,
                               color: gpsStatus.color,
@@ -1306,7 +1306,7 @@ export default function Dashboard() {
                                 )}
                                 {/* 最終更新時刻を表示 */}
                                 {'lastUpdate' in gpsStatus && gpsStatus.lastUpdate && (
-                                  <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                  <div style={{ fontSize: '10px', color: '#666', marginTop: '1px' }}>
                                     最終更新：{getTimeAgo(gpsStatus.lastUpdate)}
                                   </div>
                                 )}
@@ -1328,7 +1328,7 @@ export default function Dashboard() {
                                     <span style={{
                                       padding: '6px 16px',
                                       borderRadius: '20px',
-                                      fontSize: '15px',
+                                      fontSize: '20px',
                                       fontWeight: 'bold',
                                       backgroundColor: distanceStatus.bgColor,
                                       color: distanceStatus.color,
@@ -1336,13 +1336,12 @@ export default function Dashboard() {
                                       display: 'inline-block'
                                     }}>
                                       {distanceStatus.status}
-                                    </span>
-                                    
                                     {distanceStatus.distance !== null && (
-                                      <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                      <div style={{ fontSize: '10px', color: '#666', marginTop: '1px' }}>
                                         {distanceStatus.distance.toFixed(1)}m
                                       </div>
                                     )}
+                                    </span>
                                   </div>
                                 );
                               })()}

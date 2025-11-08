@@ -62,7 +62,7 @@ const alertIcon = new L.Icon({
 });
 
 const baseLocationIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png',
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
@@ -561,7 +561,7 @@ export default function Mode3GPS({
 
 
 
-          <div className="form-group">
+          {/* <div className="form-group">
             <label className="form-label">はぐれ警告</label>
             <button
               onClick={() => setAlertEnabled(!alertEnabled)}
@@ -591,7 +591,7 @@ export default function Mode3GPS({
               />
               {alertEnabled ? '有効' : '無効'}
             </button>
-          </div>
+          </div> */}
         </div>
 
         {/* マップ（右側） */}
@@ -628,7 +628,7 @@ export default function Mode3GPS({
                 <Circle
                   center={[baseLocation.lat, baseLocation.lon]}
                   radius={baseLocationDistance}
-                  pathOptions={{ color: '#9C27B0', fillColor: '#9C27B0', fillOpacity: 0.1 }}
+                  pathOptions={{ color: '#2d7d45', fillColor: '#2d7d45', fillOpacity: 0.1 }}
                 />
               </>
             )}
@@ -745,7 +745,7 @@ export default function Mode3GPS({
                         [tracker.position!.lat, tracker.position!.lon]
                       ]}
                       pathOptions={{
-                        color: tooFar ? '#E74C3C' : '#9C27B0',
+                        color: tooFar ? '#E74C3C' : '#2d7d45',
                         weight: 2,
                         dashArray: '5, 10'
                       }}
