@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { MapContainer, TileLayer, Marker, Circle, Popup, Polyline, Tooltip, useMapEvent } from 'react-leaflet';
 import L from 'leaflet';
 import { calculateGPSDistance } from '../utils/positioning';
 
-// 🔥 共通typesから使用
+// 共通typesから使用
 import { Device } from '../types';
 
 // Leafletのデフォルトアイコンの問題を修正
@@ -19,12 +19,14 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// 🔥 重複するTrackerDevice型定義を削除し、共通Device型を使用
+// 重複するTrackerDevice型定義を削除し、共通Device型を使用
 type TrackerDevice = Device;
 
-// 🔥 TestUnifiedComponentsからのデータを受け取るためのProps
+// TestUnifiedComponentsからのデータを受け取るためのProps
 interface Mode3Props {
-  devices?: Device[];  // 外部から渡されるデバイスデータ
+  devices?: Device[];                 // 外部から渡されるデバイスデータ
+  parentTrackers?: string[];          // 選択された親トラッカー一覧（外部管理）
+  onParentTrackersChange?: (ids: string[]) => void; // 親トラッカー変更コールバック
 }
 
 // アイコンの定義（変更なし）
@@ -68,18 +70,18 @@ function MapZoomListener({ onZoomChange }: { onZoomChange: (zoom: number) => voi
   return null;
 }
 
-export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) {
-  // 🔥 重複するstate管理を削除し、必要最小限に
+export default function Mode3GPS({ devices: externalDevices, parentTrackers: externalParentTrackers = [], onParentTrackersChange }: Mode3Props) {
+  // 重複するstate管理を削除し、必要最小限に
   const [trackers, setTrackers] = useState<TrackerDevice[]>(externalDevices || []);
   const [isLoading, setIsLoading] = useState(true);
-  const [parentTrackers, setParentTrackers] = useState<string[]>([]);
+  const [parentTrackers, setParentTrackers] = useState<string[]>(externalParentTrackers);
   const [maxDistance, setMaxDistance] = useState(30);
   const [alerts, setAlerts] = useState<string[]>([]);
   const [alertEnabled, setAlertEnabled] = useState(true);
   const [mapCenter, setMapCenter] = useState({ lat: 38.2559, lon: 140.8398 });
   const [zoomLevel, setZoomLevel] = useState(16);
 
-  // 🔥 重複するuseEffectを削除し、外部データ依存に変更
+  // 重複するuseEffectを削除し、外部データ依存に変更
   useEffect(() => {
     if (externalDevices) {
       // 外部データが渡されている場合は重複読み込みをスキップ
@@ -99,14 +101,14 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
     }
   }, [externalDevices]);
 
-  // 🔥 外部データの更新を反映
+  // 外部データの更新を反映
   useEffect(() => {
     if (externalDevices) {
       setTrackers(externalDevices);
     }
   }, [externalDevices]);
 
-  // 🔥 重複するloadDevicesAndGPS関数を簡素化（独立使用時のみ）
+  // 重複するloadDevicesAndGPS関数を簡素化（独立使用時のみ）
   const loadDevicesAndGPS = async () => {
     try {
       setIsLoading(true);
@@ -248,7 +250,27 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
     return hasValidDistance && minDistance > maxDistance && minDistance !== Infinity;
   };
 
-  // 🔥 UI部分は変更なし（レンダリング部分）
+  useEffect(() => {
+    setParentTrackers(externalParentTrackers);
+  }, [externalParentTrackers]);
+
+  // 親トラッカー変更時に外部へ通知
+  const handleParentTrackerToggle = useCallback((trackerId: string) => {
+    setParentTrackers(prev => {
+      const newParents = prev.includes(trackerId)
+        ? prev.filter(id => id !== trackerId)
+        : [...prev, trackerId];
+      
+      // 外部コールバックがあれば通知
+      if (onParentTrackersChange) {
+        onParentTrackersChange(newParents);
+      }
+      
+      return newParents;
+    });
+  }, [onParentTrackersChange]);
+
+  // UI部分は変更なし（レンダリング部分）
   if (isLoading) {
     return (
       <div className="container">
@@ -338,11 +360,12 @@ export default function Mode3GPS({ devices: externalDevices }: Mode3Props = {}) 
                         type="checkbox"
                         checked={isParent}
                         onChange={(e) => {
-                          if (e.target.checked) {
-                            setParentTrackers([...parentTrackers, tracker.id]);
-                          } else {
-                            setParentTrackers(parentTrackers.filter(id => id !== tracker.id));
-                          }
+                          // if (e.target.checked) {
+                          //   setParentTrackers([...parentTrackers, tracker.id]);
+                          // } else {
+                          //   setParentTrackers(parentTrackers.filter(id => id !== tracker.id));
+                          // }
+                          handleParentTrackerToggle(tracker.id);
                         }}
                         style={{ transform: 'scale(1.2)' }}
                       />
