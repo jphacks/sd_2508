@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { ref, onValue, update, get } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { calculateGPSDistance } from '../utils/positioning';
 
 // 各モードのダッシュボードコンポーネント
 import Mode1Indoor from './Mode1Indoor';
@@ -61,6 +62,7 @@ const createJstTimestamp = () => {
 
 export default function Dashboard() {
   // === 基本状態管理 ===
+  const [parentTrackers, setParentTrackers] = useState<string[]>([]);
   const [currentMode, setCurrentMode] = useState<Mode>('indoor');
   const [devices, setDevices] = useState<Device[]>([]);
   const [beacons, setBeacons] = useState<BeaconDevice[]>([]);
@@ -70,10 +72,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // 🌡️ 温度閾値設定
+  // 温度閾値設定
   const [temperatureThreshold, setTemperatureThreshold] = useState<number>(28);
 
-  // 🔧 バス監視設定を追加（範囲ベース）
+  // バス監視設定を追加（範囲ベース）
   const [busRange, setBusRange] = useState(5); // メートル単位
   const [rssiThreshold, setRssiThreshold] = useState(-75);
   const [alertThreshold, setAlertThreshold] = useState(3);
@@ -81,6 +83,10 @@ export default function Dashboard() {
   const [connectionTimeout, setConnectionTimeout] = useState(10);
   const [showAllDevices, setShowAllDevices] = useState(false);
   const [busDeviceAlertThreshold, setBusDeviceAlertThreshold] = useState(1); // バス内デバイス数の警告閾値
+
+  const [gpsMaxDistance, setGpsMaxDistance] = useState(30);
+  const [baseLocation, setBaseLocation] = useState<{ lat: number; lon: number } | null>(null);
+  const [baseLocationDistance, setBaseLocationDistance] = useState(50);
 
   // リアルタイム更新用のstate（1秒ごとに経過時間を更新）
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
@@ -589,7 +595,7 @@ export default function Dashboard() {
 
   const getBusStatus = (device: Device, busDeviceCount: number) => {
 
-    // 🔧 警告条件: バス内デバイス数が閾値以下の場合
+    // 警告条件: バス内デバイス数が閾値以下の場合
     const shouldAlert = busDeviceCount <= busDeviceAlertThreshold;
 
     // 1. Mode2Busと同じローカルBLE判定を最優先で実行
@@ -663,7 +669,7 @@ export default function Dashboard() {
     return { status: 'BLE未受信', ...STATUS_COLORS.inactive };
   };
 
-    // 🔧 GPS状態判定関数を追加
+    // GPS状態判定関数を追加
   const getGPSStatus = (device: Device) => {
     if (!device.position) {
       return { 
@@ -693,30 +699,198 @@ export default function Dashboard() {
         }
       }
 
-      // 🔧 2種類のパラメータのみ
+      // 基準位置が設定されている場合、距離を計算
+      let distanceFromBase: number | null = null;
+      let isOutOfRange = false;
+      
+      if (baseLocation) {
+        distanceFromBase = calculateGPSDistance(
+          baseLocation.lat,
+          baseLocation.lon,
+          lat,
+          lon
+        );
+        isOutOfRange = distanceFromBase > baseLocationDistance;
+      }
+
+
       if (updateTime) {
         return {
-          status: 'GPS取得済み',
-          ...STATUS_COLORS.success,
+          status: isOutOfRange ? '範囲外' : '範囲内',
+          color: isOutOfRange ? STATUS_COLORS.alert.color : STATUS_COLORS.success.color,
+          bgColor: isOutOfRange ? STATUS_COLORS.alert.bgColor : STATUS_COLORS.success.bgColor,
           coordinates: { lat, lon },
-          lastUpdate: updateTime
+          lastUpdate: updateTime,
+          distance: distanceFromBase
         };
       } else {
         return {
-          status: 'GPS取得済み(時刻不明)',
-          ...STATUS_COLORS.success,
+          status: isOutOfRange ? '範囲外' : '範囲内(更新時刻不明)',
+          color: isOutOfRange ? STATUS_COLORS.alert.color : STATUS_COLORS.success.color,
+          bgColor: isOutOfRange ? STATUS_COLORS.alert.bgColor : STATUS_COLORS.success.bgColor,
           coordinates: { lat, lon },
-          lastUpdate: null
+          lastUpdate: null,
+          distance: distanceFromBase
         };
       }
     } catch (error) {
       console.error('GPS状態判定エラー:', error);
       return { 
         status: 'GPS未取得', 
-        ...STATUS_COLORS.inactive
+        ...STATUS_COLORS.inactive,
+        distance: null
       };
     }
   };
+
+  // 子トラッカーが離れすぎているか（親リストは上の state を参照）
+  const isChildTooFar = useCallback((trackerId: string, useDevices: Device[] = devices): boolean => {
+    const child = useDevices.find(d => d.id === trackerId);
+    
+    if (!child?.position || parentTrackers.includes(trackerId)) {
+      return false;
+    }
+
+    const parentsWithGPS = useDevices.filter(d => 
+      parentTrackers.includes(d.id) && d.position
+    );
+    
+    if (parentsWithGPS.length === 0) {
+      return false;
+    }
+
+    let minDistance = Infinity;
+    
+    parentsWithGPS.forEach(parent => {
+      if (!parent.position) return;
+      
+      const R = 6371e3;
+      const φ1 = (child.position!.lat * Math.PI) / 180;
+      const φ2 = (parent.position!.lat * Math.PI) / 180;
+      const Δφ = ((parent.position!.lat - child.position!.lat) * Math.PI) / 180;
+      const Δλ = ((parent.position!.lon - child.position!.lon) * Math.PI) / 180;
+
+      const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c;
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    });
+
+    // const maxDistanceForAlert = 30; // Mode3 の maxDistance に合わせたい場合は state 化して共有してください
+    return minDistance > gpsMaxDistance && minDistance !== Infinity;
+  }, [devices, parentTrackers, gpsMaxDistance]);
+
+  const getGPSDistanceStatus = (device: Device) => {
+    if (!device.position) {
+      return {
+        status: '-',
+        color: '#6c757d',
+        bgColor: '#e9ecef',
+        distance: null
+      };
+    }
+
+    if (parentTrackers.length > 0) {
+      // 親トラッカーの場合
+      if (parentTrackers.includes(device.id)) {
+        return {
+          status: '保護者',
+          color: '#2d7d45',
+          bgColor: '#c8e6c9',
+          distance: null
+        };
+      }
+
+      // 親トラッカーがいる場合は親からの距離を計算
+      const parentsWithGPS = devices.filter(d => 
+        parentTrackers.includes(d.id) && d.position
+      );
+      
+      if (parentsWithGPS.length === 0) {
+        return {
+          status: '親GPS未取得',
+          color: '#6c757d',
+          bgColor: '#e9ecef',
+          distance: null
+        };
+      }
+
+      // 最も近い親までの距離を計算
+      let minDistance = Infinity;
+      
+      parentsWithGPS.forEach(parent => {
+        if (!parent.position) return;
+        
+        const distance = calculateGPSDistance(
+          parent.position.lat,
+          parent.position.lon,
+          device.position!.lat,
+          device.position!.lon
+        );
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+        }
+      });
+
+      const isTooFar = minDistance > gpsMaxDistance;
+      
+      return {
+        status: isTooFar ? 'はぐれ' : '正常',
+        color: isTooFar ? '#d32f2f' : '#2d7d45',
+        bgColor: isTooFar ? '#ffcdd2' : '#c8e6c9',
+        distance: minDistance !== Infinity ? minDistance : null
+      };
+    }
+
+    // 親トラッカー未設定の場合は基準位置からの距離を計算
+    if (baseLocation) {
+      const distance = calculateGPSDistance(
+        baseLocation.lat,
+        baseLocation.lon,
+        device.position.lat,
+        device.position.lon
+      );
+
+      const isTooFar = distance > baseLocationDistance;
+
+      return {
+        status: isTooFar ? '範囲外' : '範囲内',
+        color: isTooFar ? '#d32f2f' : '#2d7d45',
+        bgColor: isTooFar ? '#ffcdd2' : '#c8e6c9',
+        distance: distance
+      };
+    }
+
+    // 親トラッカーも基準位置も未設定の場合
+    return {
+      status: '基準未設定',
+      color: '#6c757d',
+      bgColor: '#e9ecef',
+      distance: null
+    };
+  };
+
+  // 親トラッカー変更ハンドラー
+  const handleParentTrackersChange = useCallback((ids: string[]) => {
+    setParentTrackers(ids);
+  }, []);
+
+  // 基準位置変更ハンドラー
+  const handleBaseLocationChange = useCallback((location: { lat: number; lon: number } | null) => {
+    setBaseLocation(location);
+  }, []);
+
+  // 基準位置距離変更ハンドラー
+  const handleBaseLocationDistanceChange = useCallback((distance: number) => {
+    setBaseLocationDistance(distance);
+  }, []);
+
 
   if (loading) {
     return (
@@ -847,6 +1021,7 @@ export default function Dashboard() {
                       }}>
                         気温
                       </th>
+                      {parentTrackers.length <= 0 && (
                       <th style={{
                         padding: '12px 16px',
                         textAlign: 'center',
@@ -856,11 +1031,23 @@ export default function Dashboard() {
                       }}>
                         GPS情報
                       </th>
+                      )}
+                      {parentTrackers.length > 0 && (
+                        <th style={{
+                          padding: '12px 16px',
+                          textAlign: 'center',
+                          fontWeight: 'bold',
+                          color: '#495057',
+                          minWidth: '120px'
+                        }}>
+                          はぐれ検知
+                        </th>
+                        )}
                     </tr>
                   </thead>
                   <tbody>
                     {(() => {
-                      // 🔧 バス内デバイス数を一度だけ計算
+                      // バス内デバイス数を一度だけ計算
                       const busDeviceCount = devices.filter(d => {
                         if (!selectedBeacon) return false;
                         
@@ -944,6 +1131,7 @@ export default function Dashboard() {
                                 </>
                               ) : '更新情報なし'}
                             </div>
+                            
                           </td>
 
                           {/* 室内検知 */}
@@ -1020,6 +1208,7 @@ export default function Dashboard() {
                           </td>
 
                           {/* GPS */}
+                          {parentTrackers.length <= 0 && (
                           <td style={{
                             padding: '12px 16px',
                             textAlign: 'center',
@@ -1029,7 +1218,7 @@ export default function Dashboard() {
                               <span style={{
                               padding: '6px 16px',
                               borderRadius: '20px',
-                              fontSize: '16px',
+                              fontSize: '18px',
                               fontWeight: 'bold',
                               backgroundColor: gpsStatus.bgColor,
                               color: gpsStatus.color,
@@ -1037,27 +1226,57 @@ export default function Dashboard() {
                               display: 'inline-block'
                               }}>
                                 {gpsStatus.status}
+                                {/* 距離情報を表示 */}
+                                {'distance' in gpsStatus && gpsStatus.distance !== null && baseLocation && (
+                                  <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                    {/* 基準位置から: {gpsStatus.distance.toFixed(1)}m */}
+                                  </div>
+                                )}
+                                {/* 最終更新時刻を表示 */}
                                 {'lastUpdate' in gpsStatus && gpsStatus.lastUpdate && (
-                                <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
-                                  最終更新：{getTimeAgo(gpsStatus.lastUpdate)}
-                                </div>
-                              )}
+                                  <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                    最終更新：{getTimeAgo(gpsStatus.lastUpdate)}
+                                  </div>
+                                )}
                               </span>
-                              
-                              {/* {gpsStatus.coordinates && (
-                                <div style={{ fontSize: '11px', color: '#333', fontFamily: 'monospace', marginTop: '6px' }}>
-                                  {gpsStatus.coordinates.lat.toFixed(5)}, {gpsStatus.coordinates.lon.toFixed(5)}
-                                </div>
-                              )} */}
-
-                              {/* {gpsStatus.lastUpdate && (
-                                <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
-                                  {getTimeAgo(gpsStatus.lastUpdate)}
-                                </div>
-                              )} */}
+                             
                             </div>
                           </td>
-                        </tr>
+                          )}
+
+                          {parentTrackers.length > 0 && (
+                            <td style={{
+                              padding: '12px 16px',
+                              textAlign: 'center'
+                            }}>
+                              {(() => {
+                                const distanceStatus = getGPSDistanceStatus(device);
+                                return (
+                                  <div>
+                                    <span style={{
+                                      padding: '6px 16px',
+                                      borderRadius: '20px',
+                                      fontSize: '15px',
+                                      fontWeight: 'bold',
+                                      backgroundColor: distanceStatus.bgColor,
+                                      color: distanceStatus.color,
+                                      border: `1px solid ${distanceStatus.color}40`,
+                                      display: 'inline-block'
+                                    }}>
+                                      {distanceStatus.status}
+                                    </span>
+                                    
+                                    {distanceStatus.distance !== null && (
+                                      <div style={{ fontSize: '12px', color: '#666', marginTop: '6px' }}>
+                                        {distanceStatus.distance.toFixed(1)}m
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                              </td>
+                              )}
+                       </tr>
                       );
                     })})()}
                   </tbody>
@@ -1122,9 +1341,15 @@ export default function Dashboard() {
               )}
 
               {currentMode === 'gps' && (
-                <div>
-                  <Mode3GPS devices={devices} />
-                </div>
+                <Mode3GPS 
+                  devices={devices}
+                  parentTrackers={parentTrackers}
+                  onParentTrackersChange={handleParentTrackersChange}
+                  baseLocation={baseLocation}
+                  onBaseLocationChange={handleBaseLocationChange}
+                  baseLocationDistance={baseLocationDistance}
+                  onBaseLocationDistanceChange={handleBaseLocationDistanceChange}
+                />
               )}
             </div>
           </div>
