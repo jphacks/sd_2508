@@ -119,7 +119,7 @@ export default function AlertPanel({ alerts, onDismiss, currentMode }: Props) {
         alignItems: 'center',
         gap: '8px'
       }}>
-        <span style={{ fontSize: '16px' }}>🚨</span>
+        {/* <span style={{ fontSize: '16px' }}>🚨</span> */}
         <span>
           アクティブなアラート: <strong>{alerts.length}件</strong>
           {currentMode && (

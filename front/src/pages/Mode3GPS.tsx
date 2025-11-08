@@ -35,7 +35,7 @@ interface Mode3Props {
 
 // アイコンの定義（変更なし）
 const parentIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
@@ -214,7 +214,7 @@ export default function Mode3GPS({
 
         if (nearest.distance > maxDistance) {
           newAlerts.push(
-            `🚨 ${child.name} が ${nearest.parent.name} から ${nearest.distance.toFixed(0)}m 離れています！`
+            `${child.name} が ${nearest.parent.name} から ${nearest.distance.toFixed(0)}m 離れています！`
           );
         }
       }
@@ -338,7 +338,7 @@ export default function Mode3GPS({
         <div key={index} className="alert alert-danger" style={{ marginBottom: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <strong>警告</strong>
+              <strong style={{ fontSize: '24px' }}>警告</strong>
               <p style={{ marginTop: '8px', margin: 0 }}>{alert}</p>
             </div>
             <button
@@ -347,7 +347,7 @@ export default function Mode3GPS({
                 background: 'transparent',
                 border: 'none',
                 color: 'white',
-                fontSize: '24px',
+                fontSize: '40px',
                 cursor: 'pointer'
               }}
             >
@@ -461,7 +461,7 @@ export default function Mode3GPS({
                 value={maxDistance}
                 onChange={(e) => setMaxDistance(Number(e.target.value))}
                 min={10}
-                max={100}
+                max={10000}
                 step={5}
               />
               <p style={{ fontSize: '12px', marginTop: '4px', color: '#7f8c8d' }}>
@@ -548,7 +548,7 @@ export default function Mode3GPS({
                       }
                     }}
                     min={10}
-                    max={500}
+                    max={10000}
                     step={10}
                   />
                   <p style={{ fontSize: '12px', marginTop: '4px', color: '#7f8c8d' }}>
@@ -657,7 +657,7 @@ export default function Mode3GPS({
                 <Circle
                   center={[tracker.position!.lat, tracker.position!.lon]}
                   radius={maxDistance}
-                  pathOptions={{ color: '#4A90E2', fillColor: '#4A90E2', fillOpacity: 0.1 }}
+                  pathOptions={{ color: '#2d7d45', fillColor: '#2d7d45', fillOpacity: 0.1 }}
                 />
               </div>
             ))}
@@ -730,7 +730,7 @@ export default function Mode3GPS({
                         [tracker.position!.lat, tracker.position!.lon]
                       ]}
                       pathOptions={{
-                        color: tooFar ? '#E74C3C' : '#4A90E2',
+                        color: tooFar ? '#E74C3C' : '#2d7d45',
                         weight: 2,
                         dashArray: '5, 10'
                       }}
