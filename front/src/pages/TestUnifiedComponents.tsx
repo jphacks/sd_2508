@@ -144,14 +144,7 @@ export default function Dashboard() {
       hasNewAlert = true;
     });
 
-    const prevLength = prevAlerts.length;
-    const hasRemovalOrOrderChange =
-      prevLength !== nextAlerts.length ||
-      nextAlerts.some((alert, index) => prevAlerts[index]?.deviceId !== alert.deviceId);
-
-    if (hasNewAlert || hasRemovalOrOrderChange) {
-      setShockAlerts(nextAlerts);
-    }
+    setShockAlerts(nextAlerts);
 
     if (hasNewAlert && audioRef.current) {
       audioRef.current.currentTime = 0;
@@ -166,8 +159,6 @@ export default function Dashboard() {
       await update(ref(rtdb, `devices/${deviceId}/status`), { shock: false });
     } catch (error) {
       console.error(`❌ Shock値の更新に失敗: ${error}`);
-    } finally {
-      setShockAlerts(prev => prev.filter(alert => alert.deviceId !== deviceId));
     }
   }, []);
 
