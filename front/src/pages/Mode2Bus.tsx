@@ -666,8 +666,7 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
                           <div style={{
                             fontSize: '16px',
                             fontWeight: 'bold',
-                            color: latestBleData && latestBleData.rssi >= -60 ? '#4CAF50' : 
-                                   latestBleData && latestBleData.rssi >= -70 ? '#FF9800' : '#F44336'
+                            color: latestBleData && latestBleData.rssi > -100 ? '#4CAF50' : '#FF9800'
                           }}>
                             {latestBleData?.rssi || 'N/A'} dBm
                           </div>
@@ -681,8 +680,7 @@ const estimateDistance = useCallback((rssi: number, rssiAt1m: number = -59): num
                             <div style={{
                               width: `${rssiPercentage}%`,
                               height: '100%',
-                              backgroundColor: latestBleData && latestBleData.rssi >= -60 ? '#4CAF50' : 
-                                             latestBleData && latestBleData.rssi >= -70 ? '#FF9800' : '#F44336',
+                              backgroundColor: latestBleData && latestBleData.rssi > -100 ? '#4CAF50' : '#FF9800',
                               borderRadius: '2px'
                             }} />
                           </div>
