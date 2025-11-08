@@ -251,27 +251,6 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         return;
       }
 
-      // ビーコン位置情報を構築
-      const beaconPositions = roomProfile.beacons
-        .map((beaconId) => {
-          const beacon = beaconsRef.current.find(b => b.firestoreId === beaconId);
-          if (beacon && beacon.place) {
-            return {
-              x: beacon.place.x,
-              y: beacon.place.y,
-              mac: beacon.mac,
-              beaconId: beaconId,
-            };
-          }
-          return null;
-        })
-        .filter((b) => b !== null) as Array<{
-          x: number;
-          y: number;
-          mac: string;
-          beaconId: string;
-        }>;
-
       // MACアドレスベースのRSSIマップ作成
       const rssiMap: { [mac: string]: number } = {};
       
@@ -294,8 +273,7 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       // 位置推定実行
       const position = estimatePositionHybrid(
         rssiMap,
-        roomProfile.calibrationPoints,
-        beaconPositions.length >= 3 ? beaconPositions : undefined
+        roomProfile.calibrationPoints
       );
 
       if (position) {
