@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ModeSelector from '../components/unified/ModeSelector';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import ShockAlertModal from '../components/ShockAlertModal';
-import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition, TemperatureThresholdSettings } from '../types';
+import { Alert, Device, Mode, ModeConfig, RoomLayout, BeaconDevice, GPSPosition, TemperatureThresholdSettings, BusSettings } from '../types';
 import { collection, onSnapshot, doc as firestoreDoc, updateDoc, setDoc, getDocs, getDoc, deleteField } from 'firebase/firestore';
 import { ref, onValue, update, get } from 'firebase/database';
 import { db, rtdb } from '../firebase';
@@ -409,12 +409,35 @@ export default function Dashboard() {
     
     setBusRange(newRange);
 
+    // Firestoreに保存
+    try {
+      await setDoc(firestoreDoc(db, 'settings', 'bus-settings'), {
+        rssiThreshold: threshold,
+        busDeviceAlertThreshold: busDeviceAlertThreshold
+      });
+    } catch (error) {
+      console.error('RSSI閾値の保存エラー:', error);
+    }
+
     if (triggerBusStatusUpdateRef.current) {
       await triggerBusStatusUpdateRef.current(newRange);
     }
-  }, [estimateDistance]);
+  }, [estimateDistance, busDeviceAlertThreshold]);
 
+  // バス内デバイス数警告閾値の変更ハンドラー
+  const handleBusDeviceAlertThresholdChange = useCallback(async (threshold: number) => {
+    setBusDeviceAlertThreshold(threshold);
 
+    // Firestoreに保存（バス内デバイス数警告閾値のみ）
+    try {
+      await setDoc(firestoreDoc(db, 'settings', 'bus-settings'), {
+        rssiThreshold: rssiThreshold,
+        busDeviceAlertThreshold: threshold
+      });
+    } catch (error) {
+      console.error('バス内デバイス数警告閾値の保存エラー:', error);
+    }
+  }, [rssiThreshold]);
 
   // === モード設定 ===
   const modeConfigs: Record<Mode, ModeConfig> = {
@@ -453,6 +476,14 @@ export default function Dashboard() {
         if (tempThresholdDoc.exists()) {
           const tempSettings = tempThresholdDoc.data() as TemperatureThresholdSettings;
           setTemperatureThreshold(tempSettings.highTempThreshold || 28);
+        }
+        
+        // バス設定を読み込み
+        const busSettingsDoc = await getDoc(firestoreDoc(db, 'settings', 'bus-settings'));
+        if (busSettingsDoc.exists()) {
+          const busSettings = busSettingsDoc.data() as BusSettings;
+          setRssiThreshold(busSettings.rssiThreshold || -75);
+          setBusDeviceAlertThreshold(busSettings.busDeviceAlertThreshold || 1);
         }
         
         // ビーコンデータを読み込み
@@ -1421,7 +1452,7 @@ export default function Dashboard() {
                     busRange={busRange}
                     onBusRangeChange={handleBusRangeChange}
                     busDeviceAlertThreshold={busDeviceAlertThreshold}
-                    onBusDeviceAlertThresholdChange={setBusDeviceAlertThreshold}
+                    onBusDeviceAlertThresholdChange={handleBusDeviceAlertThresholdChange}
                   />
                 </div>
               )}

@@ -267,6 +267,12 @@ export interface TemperatureThresholdSettings {
   rssiSumThreshold?: number; // 🔥 RSSI合計の退室判定閾値（デフォルト-200）
 }
 
+// バス内デバイス数警告閾値設定
+export interface BusSettings {
+  rssiThreshold: number; // バス内判定閾値（dBm、デフォルト-75）
+  busDeviceAlertThreshold: number; // バス内デバイス数警告閾値（デフォルト1）
+}
+
 export interface AppConfig {
   currentMode: AppMode;
   mode1?: Mode1Config;
