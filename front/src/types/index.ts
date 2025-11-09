@@ -264,6 +264,7 @@ export interface Mode3Config {
 export interface TemperatureThresholdSettings {
   highTempThreshold: number; // 高温警告の閾値（デフォルト28度）
   lowTempThreshold?: number; // 低温警告の閾値（オプション）
+  rssiSumThreshold?: number; // 🔥 RSSI合計の退室判定閾値（デフォルト-200）
 }
 
 export interface AppConfig {

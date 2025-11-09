@@ -6,7 +6,8 @@ import { TemperatureThresholdSettings } from '../types';
 export default function TemperatureThresholdSettingsComponent() {
   const [settings, setSettings] = useState<TemperatureThresholdSettings>({
     highTempThreshold: 28,
-    lowTempThreshold: undefined
+    lowTempThreshold: undefined,
+    rssiSumThreshold: -200  // 🔥 新しいフィールド: RSSI合計の退室判定閾値
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -37,7 +38,8 @@ export default function TemperatureThresholdSettingsComponent() {
     try {
       // undefinedのフィールドを除外
       const dataToSave: any = {
-        highTempThreshold: settings.highTempThreshold
+        highTempThreshold: settings.highTempThreshold,
+        rssiSumThreshold: settings.rssiSumThreshold ?? -200  // 🔥 RSSI閾値を追加
       };
       
       // lowTempThresholdが設定されている場合のみ追加
@@ -74,7 +76,7 @@ export default function TemperatureThresholdSettingsComponent() {
         fontWeight: '600', 
         marginBottom: '20px'
       }}>
-        温度設定
+        閾値設定
       </h2>
 
       <div style={{ marginBottom: '24px' }}>
@@ -107,6 +109,40 @@ export default function TemperatureThresholdSettingsComponent() {
             }}
           />
           <span style={{ fontSize: '16px', fontWeight: '500' }}>°C</span>
+        </div>
+      </div>
+
+      {/* 🔥 RSSI合計の退室判定閾値設定を追加 */}
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ 
+          display: 'block', 
+          marginBottom: '8px',
+          fontWeight: '500',
+          fontSize: '14px'
+        }}>
+          RSSI合計の退室判定閾値
+        </label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <input
+            type="number"
+            min="-300"
+            max="-50"
+            step="10"
+            value={settings.rssiSumThreshold ?? -200}
+            onChange={(e) => setSettings({
+              ...settings,
+              rssiSumThreshold: parseInt(e.target.value) || -200
+            })}
+            style={{
+              padding: '8px 12px',
+              fontSize: '16px',
+              border: '1px solid #ddd',
+              borderRadius: '6px',
+              width: '120px',
+              textAlign: 'center'
+            }}
+          />
+          <span style={{ fontSize: '14px', color: '#666' }}></span>
         </div>
       </div>
 

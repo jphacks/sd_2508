@@ -83,6 +83,9 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
   // 🔥 相対時刻を定期的に更新するための状態フラグ
   const [updateTicker, setUpdateTicker] = useState(0);
 
+  // 🔥 RSSI合計の退室判定閾値（デフォルト: -200）
+  const [rssiSumThreshold, setRssiSumThreshold] = useState<number>(-200);
+
   const normalizeTimestampToIso = useCallback((value: unknown): string | null => {
     if (typeof value === "string" && value.trim().length > 0) {
       const parsed = new Date(value);
@@ -190,10 +193,11 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     try {
       setLoading(true);
       
-      const [beaconsSnapshot, roomsSnapshot, configSnapshot] = await Promise.all([
+      const [beaconsSnapshot, roomsSnapshot, configSnapshot, settingsSnapshot] = await Promise.all([
         getDocs(collection(db, 'beacons')),
         getDocs(collection(db, 'rooms')),
-        getDocs(collection(db, 'appConfig')) // 🔥 追加: ユーザー設定を取得
+        getDocs(collection(db, 'appConfig')), // 🔥 追加: ユーザー設定を取得
+        getDoc(doc(db, 'settings', 'temperature-thresholds')) // 🔥 追加: RSSI閾値を取得
       ]);
 
       const beaconsData = beaconsSnapshot.docs.map(doc => ({
@@ -210,6 +214,14 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
       })) as RoomProfile[];
       
       setAvailableRooms(roomProfiles);
+      
+      // 🔥 RSSI合計の退室判定閾値を読み込み
+      if (settingsSnapshot.exists()) {
+        const settings = settingsSnapshot.data() as any;
+        if (typeof settings.rssiSumThreshold === 'number') {
+          setRssiSumThreshold(settings.rssiSumThreshold);
+        }
+      }
       
       // 🔥 アクティブルーム検索
       const userId = 'demo-user'; // TODO: 実際のユーザーIDを使用
@@ -270,6 +282,10 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
         return;
       }
 
+      // 🔥 RSSI合計を計算
+      const rssiSum = Object.values(rssiMap).reduce((sum, rssi) => sum + rssi, 0);
+      console.log(`📊 ${device.name}: RSSI合計 = ${rssiSum}`);
+
       // 位置推定実行
       const position = estimatePositionHybrid(
         rssiMap,
@@ -292,7 +308,8 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
           return newMap;
         });
 
-        checkRoomExit(device, actualPosition, roomProfile);
+        // 🔥 RSSI合計を checkRoomExit に渡す
+        checkRoomExit(device, actualPosition, roomProfile, false, rssiSum);
 
         // 🔧 描画を強制実行
         setTimeout(() => {
@@ -455,7 +472,8 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     device: Device,
     position: { x: number; y: number },
     room: RoomProfile,
-    forceOutside: boolean = false
+    forceOutside: boolean = false,
+    rssiSum?: number  // 🔥 新しいパラメータ: RSSI合計
   ): boolean => {
     const configuredMargin =
       typeof room.exitMargin === "number" && Number.isFinite(room.exitMargin)
@@ -466,7 +484,10 @@ export default function Mode1Indoor({ devices: externalDevices }: { devices?: De
     const marginX = Math.min(Math.max(configuredMargin, 0), outlineWidth / 2);
     const marginY = Math.min(Math.max(configuredMargin, 0), outlineHeight / 2);
 
-    const isInside = forceOutside
+    // 🔥 RSSI合計による無条件退室判定を追加
+    const isRssiThresholdExceeded = typeof rssiSum === 'number' && rssiSum < rssiSumThreshold;
+
+    const isInside = forceOutside || isRssiThresholdExceeded
       ? false
       : position.x >= marginX &&
         position.x <= outlineWidth - marginX &&
