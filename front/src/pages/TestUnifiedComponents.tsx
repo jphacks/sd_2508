@@ -91,7 +91,7 @@ export default function Dashboard() {
 
   const [gpsMaxDistance, setGpsMaxDistance] = useState(30);
   const [baseLocation, setBaseLocation] = useState<{ lat: number; lon: number } | null>(null);
-  const [baseLocationDistance, setBaseLocationDistance] = useState(50);
+  const [baseLocationDistance, setBaseLocationDistance] = useState(100);
 
   // リアルタイム更新用のstate（1秒ごとに経過時間を更新）
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
